@@ -1,0 +1,23 @@
+{
+  "train": {
+    "seed": 123,
+    "precision": "bf16-mixed",
+    "max_epochs": 5,
+    "batch_size": 64,
+    "num_workers": 8,
+    "lr": 0.0003,
+    "ckpt_every_n_steps": 2000,
+    "demo_every_n_steps": 500
+  },
+  "data": {
+    "train": { "type": "dummy", "n": 20000, "d_in": 128, "n_classes": 10 },
+    "val":   { "type": "dummy", "n": 2000,  "d_in": 128, "n_classes": 10 },
+    "demo":  { "type": "dummy", "n": 256,   "d_in": 128, "n_classes": 10, "batch_size": 8 }
+  },
+  "model": {
+    "type": "mlp",
+    "d_in": 128,
+    "d_hidden": 512,
+    "n_classes": 10
+  }
+}
