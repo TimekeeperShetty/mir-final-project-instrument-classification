@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local env files
+.env
+.env.*
+
+# Training outputs
+runs/
+outputs/
+logs/
+lightning_logs/
+wandb/
+checkpoints/
+*.ckpt
+
+# Large local artifacts
+data/
+artifacts/
+cache/
+
