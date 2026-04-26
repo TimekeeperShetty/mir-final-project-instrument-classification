@@ -1,169 +1,333 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List
 
-import audio
 import torch
 from torch.utils.data import Dataset
-import os
 import yaml
-import random
-import numpy as np
-import torch
-import torchaudio
-from pathlib import Path
 
-# General MIDI program number -> instrument family mapping
-# May have to modify based on the classes we choose
-PROGRAM_TO_CLASS = {
-    range(0, 8): 0,       # Piano
-    range(8, 16): 1,      # Chromatic Percussion
-    range(16, 24): 2,     # Organ
-    range(24, 32): 3,     # Guitar
-    range(32, 40): 4,     # Bass
-    range(40, 48): 5,     # Strings
-    range(48, 56): 6,     # Ensemble
-    range(56, 64): 7,     # Brass
-    range(64, 72): 8,     # Reed
-    range(72, 80): 9,     # Pipe
-    range(80, 88): 10,    # Synth Lead
-    range(88, 96): 11,    # Synth Pad
-    range(96, 104): 12,   # Synth Effects
-    range(104, 112): 13,  # Ethnic
-    range(112, 120): 14,  # Percussive
-    range(120, 128): 15,  # Sound Effects
+from . import audio
+
+# Future OpenMIC target space.
+OPENMIC_CLASS_TO_INDEX = {
+    "accordion": 0,
+    "banjo": 1,
+    "bass": 2,
+    "cello": 3,
+    "clarinet": 4,
+    "cymbals": 5,
+    "drums": 6,
+    "flute": 7,
+    "guitar": 8,
+    "mallet_percussion": 9,
+    "mandolin": 10,
+    "organ": 11,
+    "piano": 12,
+    "saxophone": 13,
+    "synthesizer": 14,
+    "trombone": 15,
+    "trumpet": 16,
+    "ukulele": 17,
+    "violin": 18,
+    "voice": 19,
+}
+
+COMMON_OPENMIC_CLASSES = [
+    "accordion",
+    "banjo",
+    "bass",
+    "cello",
+    "clarinet",
+    "drums",
+    "flute",
+    "guitar",
+    "mallet_percussion",
+    "organ",
+    "piano",
+    "saxophone",
+    "synthesizer",
+    "trombone",
+    "trumpet",
+    "violin",
+    "voice",
+]
+
+# Explicit Slakh MIDI-program mapping into the future OpenMIC label indices.
+# This is intentionally conservative:
+# - we only keep classes that overlap meaningfully with OpenMIC
+# - we map by MIDI program number instead of relying on broader GM families
+# - classes with no clean Slakh counterpart (cymbals, mandolin, ukulele) are omitted
+SLAKH_MIDI_TO_OPENMIC_CLASS = {
+    0: "piano",
+    1: "piano",
+    2: "piano",
+    3: "piano",
+    4: "piano",
+    5: "piano",
+    7: "piano",
+    11: "mallet_percussion",
+    16: "organ",
+    17: "organ",
+    18: "organ",
+    19: "organ",
+    20: "organ",
+    21: "accordion",
+    23: "accordion",
+    24: "guitar",
+    25: "guitar",
+    26: "guitar",
+    27: "guitar",
+    28: "guitar",
+    29: "guitar",
+    30: "guitar",
+    31: "guitar",
+    32: "bass",
+    33: "bass",
+    34: "bass",
+    35: "bass",
+    36: "bass",
+    37: "bass",
+    38: "bass",
+    39: "bass",
+    42: "cello",
+    43: "bass",
+    52: "voice",
+    53: "voice",
+    54: "voice",
+    56: "trumpet",
+    57: "trombone",
+    64: "saxophone",
+    65: "saxophone",
+    66: "saxophone",
+    67: "saxophone",
+    71: "clarinet",
+    73: "flute",
+    75: "flute",
+    81: "synthesizer",
+    82: "synthesizer",
+    83: "synthesizer",
+    84: "synthesizer",
+    85: "voice",
+    86: "synthesizer",
+    87: "synthesizer",
+    88: "synthesizer",
+    89: "synthesizer",
+    90: "synthesizer",
+    91: "voice",
+    92: "synthesizer",
+    93: "synthesizer",
+    94: "synthesizer",
+    95: "synthesizer",
+    96: "synthesizer",
+    97: "synthesizer",
+    98: "synthesizer",
+    99: "synthesizer",
+    100: "synthesizer",
+    101: "synthesizer",
+    102: "synthesizer",
+    103: "synthesizer",
+    105: "banjo",
+    110: "violin",
+    128: "drums",
 }
 
 
-def program_to_class_id(program: int) -> int:
-    for r, cls in PROGRAM_TO_CLASS.items():
-        if program in r:
-            return cls
-        return -1  # drums / unknown
+def program_to_openmic_class_id(program: int, is_drum: bool) -> int:
+    if is_drum:
+        return OPENMIC_CLASS_TO_INDEX["drums"]
+    class_name = SLAKH_MIDI_TO_OPENMIC_CLASS.get(program)
+    if class_name is None:
+        return -1
+    return OPENMIC_CLASS_TO_INDEX[class_name]
+
+
+def _get_split_cfg_value(split_cfg: Any, key: str, default: Any = None) -> Any:
+    if isinstance(split_cfg, dict):
+        return split_cfg.get(key, default)
+    return getattr(split_cfg, key, default)
+
+
+def _get_split_cfg_params(split_cfg: Any) -> Dict[str, Any]:
+    params = _get_split_cfg_value(split_cfg, "params", {}) or {}
+    if not isinstance(params, dict):
+        raise TypeError(f"Expected split_cfg.params to be a dict, got {type(params)!r}")
+    return params
 
 
 class SlakhDataset(Dataset):
     """
-    Pytorch Dataset for the Slakh 2100 dataset
+    Slakh dataset aligned to the future OpenMIC label space.
 
-    Supports instrument classification (could be extended to support source separation, as well)
-        - "instrument_classification": returns (audio_clip, label) where label is the instrument class index of a single
-        stem
+    Expected config:
+        split_cfg.params.root: path to the Slakh root directory
+        split_cfg.params.split: one of train / validation / val / vallidation / test
 
-    Expected directory layout:
-        root/
-            Train/ (or test/, validation/)
-                Track00001/
-                    metadata.yaml
-                    mix.flac
-                    stems/
-                        S00.flac
-                        S01.flac
-                        ...
+    Supported modes:
+        - multiclass: one example per mapped stem
+        - multilabel: one example per mix with a multi-hot OpenMIC-aligned target
     """
 
     def __init__(
-            self,
-            split_cfg: Any,  # e.g., {"root": "/data/slakh", "split": "train"}
-            task_type: str,  # "instrument classification"
-            num_classes: int,  # number of instrument classes (e.g., 16)
-            sample_rate: int,  # target sample rate (e.g., 22050)
-            clip_num_samples: int,  # samples per clip (e.g, sample_rate * 4)
-            train_mode: bool,  # True -> random crop; False -> centre crop; deterministic centre crop at eval time
-            # for reproducibility
+        self,
+        split_cfg: Any,
+        task_type: str,
+        num_classes: int,
+        sample_rate: int,
+        clip_num_samples: int,
+        train_mode: bool,
     ) -> None:
+        if task_type not in {"multiclass", "multilabel", "instrument_classification"}:
+            raise ValueError(
+                "SlakhDataset currently supports only multiclass or multilabel classification "
+                f"(got task_type={task_type!r})"
+            )
+
+        params = _get_split_cfg_params(split_cfg)
+        root_value = params.get("root")
+        if not root_value:
+            raise ValueError("SlakhDataset requires split_cfg.params.root")
+
+        self.domain = _get_split_cfg_value(split_cfg, "domain", "synthetic")
         self.task_type = task_type
         self.num_classes = num_classes
         self.sample_rate = sample_rate
         self.clip_num_samples = clip_num_samples
         self.train_mode = train_mode
 
-        root = Path(split_cfg["root"])
-        split = split_cfg.get("split", "train")  # "train" | "validation" | "test"
+        root = Path(root_value).expanduser()
+        split = str(params.get("split", "train")).lower()
+        split_dir = self._resolve_split_dir(root, split)
 
-        # Map split name -> folder name used in Slakh
-        split_dir_map = {
+        self.samples: List[Dict[str, Any]] = []
+        self._build_index(split_dir)
+
+    @staticmethod
+    def _resolve_split_dir(root: Path, split: str) -> Path:
+        normalized = {
             "train": "train",
             "validation": "validation",
             "val": "validation",
+            "vallidation": "vallidation",
             "test": "test",
+        }.get(split, split)
+
+        candidate_names = [
+            normalized,
+            "validation" if normalized == "vallidation" else "vallidation",
+            normalized.capitalize(),
+            normalized.upper(),
+            split,
+            split.capitalize(),
+            split.upper(),
+        ]
+
+        seen = set()
+        for candidate_name in candidate_names:
+            if candidate_name in seen:
+                continue
+            seen.add(candidate_name)
+            candidate = root / candidate_name
+            if candidate.exists():
+                return candidate
+
+        raise FileNotFoundError(
+            f"Could not find Slakh split directory for split={split!r} under {root}"
+        )
+
+    def _build_index(self, split_dir: Path) -> None:
+        for track_dir in sorted(split_dir.iterdir()):
+            if not track_dir.is_dir():
+                continue
+
+            meta_path = track_dir / "metadata.yaml"
+            mix_path = track_dir / "mix.flac"
+            stems_dir = track_dir / "stems"
+            if not (meta_path.exists() and stems_dir.exists()):
+                continue
+
+            with open(meta_path, "r", encoding="utf-8") as handle:
+                metadata = yaml.safe_load(handle) or {}
+
+            stems_metadata = metadata.get("stems", {})
+            if self.task_type in {"multiclass", "instrument_classification"}:
+                self._add_multiclass_samples(stems_dir, stems_metadata)
+                continue
+
+            if not mix_path.exists():
+                continue
+
+            class_ids = set()
+            for stem_info in stems_metadata.values():
+                program = int(stem_info.get("program_num", -1))
+                is_drum = bool(stem_info.get("is_drum", False))
+                class_id = program_to_openmic_class_id(program, is_drum=is_drum)
+                if 0 <= class_id < self.num_classes:
+                    class_ids.add(class_id)
+
+            if not class_ids:
+                continue
+
+            target = torch.zeros(self.num_classes, dtype=torch.float32)
+            for class_id in class_ids:
+                target[class_id] = 1.0
+
+            self.samples.append(
+                {
+                    "audio_path": mix_path,
+                    "label": target,
+                }
+            )
+
+    def _add_multiclass_samples(self, stems_dir: Path, stems_metadata: Dict[str, Any]) -> None:
+        for stem_id, stem_info in stems_metadata.items():
+            stem_path = stems_dir / f"{stem_id}.flac"
+            if not stem_path.exists():
+                continue
+
+            program = int(stem_info.get("program_num", -1))
+            is_drum = bool(stem_info.get("is_drum", False))
+            class_id = program_to_openmic_class_id(program, is_drum=is_drum)
+            if class_id < 0 or class_id >= self.num_classes:
+                continue
+
+            self.samples.append(
+                {
+                    "audio_path": stem_path,
+                    "label": class_id,
+                }
+            )
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        item = self.samples[idx]
+        waveform = audio.load_waveform(str(item["audio_path"]), self.sample_rate)
+        excerpt = audio.trim_or_pad(waveform, self.clip_num_samples, self.train_mode)
+
+        target = item["label"]
+        if isinstance(target, torch.Tensor):
+            target = target.clone()
+        else:
+            target = torch.tensor(target, dtype=torch.long)
+
+        return {
+            "inputs": excerpt,
+            "target": target,
+            "domain": self.domain,
         }
-        split_dir = root / split_dir_map[split]
-        if not split_dir.exists():
-            raise FileNotFoundError(f"Split director not found: {split_dir}")
-
-        self.samples: List[Dict] = []
-        self.build_index(split_dir)
-
-        # ------------------------------------------------------------------
-        # Index building
-        # ------------------------------------------------------------------
-
-        def _build_index(self, split_dir: Path) -> None:
-            """Walk split_dir and collect one entry per usable stem for classification.
-
-            Stores lightweight dicts of paths and labels, so __getitem__ only does I/O when actually needed
-            """
-
-            for track_dir in sorted(split_dir.iterdir()):
-                if not track_dir.is_dir():
-                    continue
-
-                meta_path = track_dir / "metadata.yaml"
-                mix_path = track_dir / "mix.flac"
-                stems_dir = track_dir / "stems"
-
-                if not (meta_path.exists() and mix_path.exists() and stems_dir.exists()):
-                    continue  # skip incomplete tracks
-
-                with open(meta_path) as f:
-                    meta = yaml.safe_load(f)
-
-                stems_meta = meta.get("stems", {})
-
-                if self.task_type == "instrument_classification":
-                    for stem_id, stem_info in stems_meta.items():
-                        stem_path = stems_dir / f"{stem_id}.flac"
-                        if not stem_path.exists():
-                            continue
-                        if stem_info.get("is_drum", False):
-                            continue  # skip drums (no program mapping)
-                        program = stem_info.get("program_num", -1)
-                        class_id = program_to_class_id(program)
-                        if class_id < 0 or class_id >= self.num_classes:
-                            continue
-                        self.samples.append({
-                            "audio_path": stem_path,
-                            "label": class_id
-                        })
-                else:
-                    raise ValueError(f"Unknown task_type: {self.task_type!r}")
-
-        # ------------------------------------------------------------------
-        # Dataset interface
-        # ------------------------------------------------------------------
-        def __len__(self) -> int:
-            return len(self.samples)
-
-        def __getitem__(self, idx: int):
-            item = self.samples[idx]
-
-            if self.task_type == "instrument_classification":
-                excerpt = audio.load_waveform(item["audio_path"], sample_rate)
-                excerpt = audio.trim_or_pad(excerpt, clip_num_samples, train_mode)
-                label = torch.tensor(item["label"], dtype=torch.long)
-                return excerpt, label
 
 
 class OpenMicDataset(Dataset):
     def __init__(
-            self,
-            split_cfg: Any,
-            task_type: str,
-            num_classes: int,
-            sample_rate: int,
-            clip_num_samples: int,
-            train_mode: bool,
+        self,
+        split_cfg: Any,
+        task_type: str,
+        num_classes: int,
+        sample_rate: int,
+        clip_num_samples: int,
+        train_mode: bool,
     ) -> None:
         raise NotImplementedError(
             "We need to implement the Dataset object for the openmic dataset here"
@@ -171,24 +335,23 @@ class OpenMicDataset(Dataset):
 
 
 def build_dataset(
-        split_cfg: Any,
-        task_type: str,
-        num_classes: int,
-        sample_rate: int,
-        clip_num_samples: int,
-        train_mode: bool,
+    split_cfg: Any,
+    task_type: str,
+    num_classes: int,
+    sample_rate: int,
+    clip_num_samples: int,
+    train_mode: bool,
 ) -> Dataset:
-    ds_type = split_cfg.type
+    ds_type = _get_split_cfg_value(split_cfg, "type")
     if ds_type == "slakh":
         return SlakhDataset(
-            split_cfg={"root": "/data/slakh2100", "split": "train"},
-            task_type="instrument_classification",
-            num_classes=16,
-            sample_rate=22050,
-            clip_num_samples=22050 * 4,  # 4-second clips
-            train_mode=True,
+            split_cfg=split_cfg,
+            task_type=task_type,
+            num_classes=num_classes,
+            sample_rate=sample_rate,
+            clip_num_samples=clip_num_samples,
+            train_mode=train_mode,
         )
-        loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 
     if ds_type == "openmic":
         return OpenMicDataset(

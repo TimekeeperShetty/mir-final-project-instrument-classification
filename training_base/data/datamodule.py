@@ -13,9 +13,8 @@ from .datasets import build_dataset
 def _basic_collate(batch: Any) -> Dict[str, Any]:
     inputs = [item["inputs"] for item in batch]
     targets = [item["target"] for item in batch]
-    lengths = torch.tensor([int(item["length"]) for item in batch], dtype=torch.long)
     domains = [item["domain"] for item in batch]
-    metadata = [item["metadata"] for item in batch]
+    lengths = torch.tensor([int(sample.shape[-1]) for sample in inputs], dtype=torch.long)
 
     if inputs[0].ndim == 1 and any(sample.shape[-1] != inputs[0].shape[-1] for sample in inputs):
         stacked_inputs = pad_sequence(inputs, batch_first=True)
@@ -33,7 +32,6 @@ def _basic_collate(batch: Any) -> Dict[str, Any]:
         "targets": stacked_targets,
         "lengths": lengths,
         "domains": domains,
-        "metadata": metadata,
     }
 
 

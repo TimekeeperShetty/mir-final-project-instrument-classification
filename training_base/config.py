@@ -111,6 +111,31 @@ class ExperimentConfig:
 
 
 @dataclass
+class WandbConfig:
+    enabled: bool = False
+    project: Optional[str] = None
+    entity: Optional[str] = None
+    name: Optional[str] = None
+    mode: Optional[str] = None
+    tags: List[str] = field(default_factory=list)
+    log_model: bool = False
+
+
+@dataclass
+class ValDemoConfig:
+    enabled: bool = True
+    count: int = 0
+    seed: Optional[int] = None
+    every_n_epochs: int = 1
+
+
+@dataclass
+class LoggingConfig:
+    wandb: WandbConfig = field(default_factory=WandbConfig)
+    val_demos: ValDemoConfig = field(default_factory=ValDemoConfig)
+
+
+@dataclass
 class ProjectConfig:
     experiment: ExperimentConfig
     trainer: TrainerConfig
@@ -118,6 +143,7 @@ class ProjectConfig:
     data: DataConfig
     encoder: EncoderConfig
     classifier: ClassifierConfig
+    logging: LoggingConfig
 
 
 def _parse_loader_config(cfg: Optional[Dict[str, Any]], fallback: Optional[LoaderConfig] = None) -> LoaderConfig:
@@ -156,6 +182,11 @@ def parse_project_config(raw_cfg: Dict[str, Any]) -> ProjectConfig:
     experiment = ExperimentConfig(**raw_cfg.get("experiment", {}))
     encoder = EncoderConfig(**raw_cfg.get("encoder", {}))
     classifier = ClassifierConfig(**raw_cfg.get("classifier", {}))
+    logging_section = raw_cfg.get("logging", {})
+    logging = LoggingConfig(
+        wandb=WandbConfig(**logging_section.get("wandb", {})),
+        val_demos=ValDemoConfig(**logging_section.get("val_demos", {})),
+    )
 
     if data.train is None:
         raise ValueError("Config must define data.train")
@@ -174,6 +205,7 @@ def parse_project_config(raw_cfg: Dict[str, Any]) -> ProjectConfig:
         data=data,
         encoder=encoder,
         classifier=classifier,
+        logging=logging,
     )
 
 
