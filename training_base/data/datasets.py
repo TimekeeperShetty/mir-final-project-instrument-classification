@@ -155,19 +155,7 @@ class SlakhDataset(Dataset):
                 return excerpt, label
 
 
-class OpenMicDataset(Dataset):
-    def __init__(
-            self,
-            split_cfg: Any,
-            task_type: str,
-            num_classes: int,
-            sample_rate: int,
-            clip_num_samples: int,
-            train_mode: bool,
-    ) -> None:
-        raise NotImplementedError(
-            "We need to implement the Dataset object for the openmic dataset here"
-        )
+from training_base.data.openmic_dataset import OpenMicDataset
 
 
 def build_dataset(
