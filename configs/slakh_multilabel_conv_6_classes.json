@@ -28,7 +28,7 @@
       "enabled": true,
       "project": "mir-instrument-classification",
       "entity": null,
-      "name": "slakh_openmic_overlap_conv",
+      "name": "slakh_openmic_overlap_conv_8_class_balanced_mixup",
       "mode": null,
       "tags": [
         "slakh",
@@ -39,39 +39,25 @@
     },
     "val_demos": {
       "enabled": true,
-      "count": 4,
+      "count": 8,
       "seed": 42,
       "every_n_epochs": 1
     }
   },
   "data": {
     "task_type": "multilabel",
-    "num_classes": 20,
+    "num_classes": 6,
     "sample_rate": 22050,
-    "clip_duration_sec": 5.0,
+    "clip_duration_sec": 10.0,
     "threshold": 0.5,
-    "min_activity_ratio": 0.1,
+    "min_activity_ratio": 0.2,
     "label_names": [
-      "accordion",
-      "banjo",
-      "bass",
-      "cello",
-      "clarinet",
-      "cymbals",
-      "drums",
-      "flute",
-      "guitar",
-      "mallet_percussion",
-      "mandolin",
-      "organ",
       "piano",
-      "saxophone",
+      "guitar",
+      "bass",
+      "drums",
       "synthesizer",
-      "trombone",
-      "trumpet",
-      "ukulele",
-      "violin",
-      "voice"
+      "violin"
     ],
     "loader": {
       "batch_size": 16,
@@ -86,8 +72,27 @@
       "input_kind": "waveform",
       "params": {
         "root": "/projects/work/marl/datasets/mir_datasets/slakh/slakh2100_flac_redux",
-        "split": "train",
-        "index_path": "/scratch/mg8253/slakh_indexes/slakh_midi_index.pt"
+        "split": ["train", "ommited"],
+        "index_path": "/scratch/mg8253/slakh_indexes/slakh_midi_index.pt",
+        "stem_remix": true,
+        "include_context_stems": true,
+        "context_stem_keep_prob": 0.7,
+        "max_context_stems": 4,
+        "max_stems_per_class": 2,
+        "class_keep_exponent": 0.5,
+        "class_keep_prob_min": 0.25,
+        "min_classes_per_crop": 2,
+        "remix_resample_attempts": 4,
+        "normalize_submix": true
+      },
+      "augmentations": {
+        "stem": {
+          "type": "example_waveform",
+          "random_gain_db": 3.0
+        },
+        "mix": {
+          "type": "identity"
+        }
       }
     },
     "val": {
@@ -118,9 +123,12 @@
     }
   },
   "encoder": {
-    "type": "conv_waveform",
+    "type": "mel_cnn",
     "input_kind": "waveform",
-    "output_dim": 128
+    "output_dim": 128,
+    "sample_rate": 22050,
+    "n_fft": 1024,
+    "n_mels": 64
   },
   "classifier": {
     "type": "mlp",

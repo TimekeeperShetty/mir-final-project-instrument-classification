@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from ..evaluation.metrics import compute_epoch_metrics, init_metric_state, update_metric_state
+from ..evaluation.metrics import compute_epoch_metrics, format_test_report, init_metric_state, update_metric_state
 from ..lightning_imports import WandbLogger, pl, wandb
 from .classifiers import build_classifier
 from .encoders import build_encoder
@@ -41,12 +41,15 @@ class DomainTransferSystem(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         #the shared step is to calculate the loss function
         logits, loss = self._shared_step(batch)
-        metrics = {"train/loss": loss}
-        self.log_dict(metrics, on_step=True, on_epoch=False, prog_bar=True, batch_size=batch["targets"].shape[0])
+        batch_size = batch["targets"].shape[0]
+        # Step loss is useful for debugging, but with shuffled random crops it is
+        # naturally noisy. We also log the epoch-average so convergence is easier to read.
+        self.log("train/loss_step", loss, on_step=True, on_epoch=False, prog_bar=False, batch_size=batch_size)
+        self.log("train/loss", loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=batch_size)
         return loss
 
     def on_validation_epoch_start(self) -> None:
-        self.val_state = init_metric_state(self.task_type, self.device)
+        self.val_state = init_metric_state(self.task_type, self.device, self.cfg.data.num_classes)
         self._val_demo_rows = []
         self._val_items_seen = 0
         self._maybe_initialize_val_demo_indices()
@@ -61,14 +64,14 @@ class DomainTransferSystem(pl.LightningModule):
         self._log_validation_demos()
 
     def on_test_epoch_start(self) -> None:
-        self.test_state = init_metric_state(self.task_type, self.device)
+        self.test_state = init_metric_state(self.task_type, self.device, self.cfg.data.num_classes)
 
     def test_step(self, batch, batch_idx):
         logits, loss = self._shared_step(batch)
         update_metric_state(self.test_state, self.task_type, logits, batch["targets"], loss, self.threshold)
 
     def on_test_epoch_end(self) -> None:
-        self._log_epoch_metrics(self.test_state, "test")
+        self._print_test_report(self.test_state)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.optimizer_cfg.lr, weight_decay=self.optimizer_cfg.weight_decay)
@@ -97,18 +100,75 @@ class DomainTransferSystem(pl.LightningModule):
     def _log_epoch_metrics(self, state: Dict[str, torch.Tensor], prefix: str) -> None:
         if not state:
             return
-        packed = torch.cat([tensor.reshape(1) for tensor in state.values()])
-        if self.trainer.world_size > 1:
-            packed = self.all_gather(packed).sum(dim=0)
-        global_state = dict(zip(state.keys(), packed.unbind(dim=0)))
-        metrics = compute_epoch_metrics(self.task_type, global_state)
+        global_state = self._reduce_metric_state(state)
+        metrics = compute_epoch_metrics(
+            self.task_type,
+            global_state,
+            label_names=self.cfg.data.label_names,
+        )
+        metrics = self._select_logged_metrics(metrics, prefix)
+        if not metrics:
+            return
         self.log_dict(
             {f"{prefix}/{name}": value for name, value in metrics.items()},
             on_step=False,
             on_epoch=True,
-            prog_bar=(prefix != "test"),
+            prog_bar=(prefix == "val"),
             sync_dist=False,
         )
+
+    def _print_test_report(self, state: Dict[str, torch.Tensor]) -> None:
+        if not getattr(self.trainer, "is_global_zero", True):
+            return
+        if not self.cfg.data.label_names:
+            return
+        global_state = self._reduce_metric_state(state)
+        report = format_test_report(
+            self.task_type,
+            global_state,
+            label_names=self.cfg.data.label_names,
+        )
+        self.print("")
+        self.print(report)
+
+    def _reduce_metric_state(self, state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        # We accumulate metric counts locally in each process, then pack everything
+        # into one vector so distributed reduction works for both scalar and vector
+        # metrics (for example per-class TP/FP/FN tensors).
+        state_shapes = {key: tensor.shape for key, tensor in state.items()}
+        state_sizes = {key: tensor.numel() for key, tensor in state.items()}
+        packed = torch.cat([tensor.reshape(-1) for tensor in state.values()])
+        if self.trainer.world_size > 1:
+            packed = self.all_gather(packed).sum(dim=0)
+
+        global_state: Dict[str, torch.Tensor] = {}
+        offset = 0
+        for key in state:
+            size = state_sizes[key]
+            shape = state_shapes[key]
+            global_state[key] = packed[offset : offset + size].reshape(shape)
+            offset += size
+        return global_state
+
+    def _select_logged_metrics(self, metrics: Dict[str, torch.Tensor], prefix: str) -> Dict[str, torch.Tensor]:
+        # Keep W&B focused: train logs train loss, validation logs only the
+        # aggregate metrics we actually want to monitor, and test metrics stay
+        # in the terminal report instead of being uploaded.
+        if prefix == "test":
+            return {}
+        if prefix != "val":
+            return metrics
+
+        allowed_names = {
+            "loss",
+            "precision_macro",
+            "recall_macro",
+            "f1_macro",
+            "precision_macro_weighted",
+            "recall_macro_weighted",
+            "f1_macro_weighted",
+        }
+        return {name: value for name, value in metrics.items() if name in allowed_names}
 
     def _maybe_initialize_val_demo_indices(self) -> None:
         if self._val_demo_indices is not None:
@@ -171,11 +231,12 @@ class DomainTransferSystem(pl.LightningModule):
 
             self._val_demo_rows.append(
                 {
+                    "epoch": self.current_epoch,
                     "dataset_index": global_idx,
                     "audio": wandb.Audio(
                         inputs[local_idx].float().numpy(),
                         sample_rate=self.cfg.data.sample_rate,
-                        caption=f"val_idx={global_idx}",
+                        caption=f"epoch={self.current_epoch} val_idx={global_idx}",
                     ),
                     "prediction": ", ".join(pred_labels) if pred_labels else "(none)",
                     "ground_truth": ", ".join(target_labels) if target_labels else "(none)",
@@ -219,9 +280,10 @@ class DomainTransferSystem(pl.LightningModule):
         if experiment is None:
             return
 
-        table = wandb.Table(columns=["dataset_index", "audio", "prediction", "ground_truth", "top_scores"])
+        table = wandb.Table(columns=["epoch", "dataset_index", "audio", "prediction", "ground_truth", "top_scores"])
         for row in self._val_demo_rows:
             table.add_data(
+                row["epoch"],
                 row["dataset_index"],
                 row["audio"],
                 row["prediction"],
@@ -236,9 +298,9 @@ class DomainTransferSystem(pl.LightningModule):
         logger = self.logger
         if logger is None:
             return None
-        if WandbLogger is not None and isinstance(logger, WandbLogger):
-            return logger.experiment
-        experiment = getattr(logger, "experiment", None)
-        if experiment is None:
+        # Only a real WandbLogger exposes an experiment object with `.log(...)`.
+        # The default Lightning logger when W&B is off is usually TensorBoard, whose
+        # `experiment` is a SummaryWriter. Treating that as W&B caused the crash.
+        if WandbLogger is None or not isinstance(logger, WandbLogger):
             return None
-        return experiment
+        return logger.experiment

@@ -63,6 +63,8 @@ class InstrumentDataModule(pl.LightningDataModule):
                 sample_rate=data_cfg.sample_rate,
                 clip_num_samples=data_cfg.clip_num_samples,
                 train_mode=True,
+                min_activity_ratio=data_cfg.min_activity_ratio,
+                label_names=data_cfg.label_names,
             )
             if data_cfg.val is not None:
                 self.val_dataset = build_dataset(
@@ -72,6 +74,8 @@ class InstrumentDataModule(pl.LightningDataModule):
                     sample_rate=data_cfg.sample_rate,
                     clip_num_samples=data_cfg.clip_num_samples,
                     train_mode=False,
+                    min_activity_ratio=data_cfg.min_activity_ratio,
+                    label_names=data_cfg.label_names,
                 )
         if stage in (None, "test"):
             if data_cfg.test is not None:
@@ -82,22 +86,24 @@ class InstrumentDataModule(pl.LightningDataModule):
                     sample_rate=data_cfg.sample_rate,
                     clip_num_samples=data_cfg.clip_num_samples,
                     train_mode=False,
+                    min_activity_ratio=data_cfg.min_activity_ratio,
+                    label_names=data_cfg.label_names,
                 )
 
     def train_dataloader(self) -> DataLoader:
-        return self._build_loader(self.train_dataset, self.cfg.data.train, shuffle=True)
+        return self._build_loader(self.train_dataset, self.cfg.data.train, shuffle=True, is_train=True)
 
     def val_dataloader(self) -> Optional[DataLoader]:
         if self.val_dataset is None:
             return None
-        return self._build_loader(self.val_dataset, self.cfg.data.val, shuffle=False)
+        return self._build_loader(self.val_dataset, self.cfg.data.val, shuffle=False, is_train=False)
 
     def test_dataloader(self) -> Optional[DataLoader]:
         if self.test_dataset is None:
             return None
-        return self._build_loader(self.test_dataset, self.cfg.data.test, shuffle=False)
+        return self._build_loader(self.test_dataset, self.cfg.data.test, shuffle=False, is_train=False)
 
-    def _build_loader(self, dataset: Any, split_cfg: Any, shuffle: bool) -> DataLoader:
+    def _build_loader(self, dataset: Any, split_cfg: Any, shuffle: bool, is_train: bool) -> DataLoader:
         loader_cfg = split_cfg.loader
         persistent_workers = loader_cfg.persistent_workers and loader_cfg.num_workers > 0
         return DataLoader(
