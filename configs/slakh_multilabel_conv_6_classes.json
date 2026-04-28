@@ -28,7 +28,7 @@
       "enabled": true,
       "project": "mir-instrument-classification",
       "entity": null,
-      "name": "slakh_openmic_overlap_conv_8_class_balanced_mixup",
+      "name": "slakh_openmic_overlap_conv_6_class_balanced_mixup",
       "mode": null,
       "tags": [
         "slakh",
@@ -71,9 +71,9 @@
       "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/projects/work/marl/datasets/mir_datasets/slakh/slakh2100_flac_redux",
+        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
         "split": ["train", "ommited"],
-        "index_path": "/scratch/mg8253/slakh_indexes/slakh_midi_index.pt",
+        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
         "stem_remix": true,
         "include_context_stems": true,
         "context_stem_keep_prob": 0.7,
@@ -100,9 +100,9 @@
       "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/projects/work/marl/datasets/mir_datasets/slakh/slakh2100_flac_redux",
+        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
         "split": "vallidation",
-        "index_path": "/scratch/mg8253/slakh_indexes/slakh_midi_index.pt"
+        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt"
       },
       "loader": {
         "drop_last": false
@@ -113,9 +113,9 @@
       "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/projects/work/marl/datasets/mir_datasets/slakh/slakh2100_flac_redux",
+        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
         "split": "test",
-        "index_path": "/scratch/mg8253/slakh_indexes/slakh_midi_index.pt"
+        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt"
       },
       "loader": {
         "drop_last": false
