@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from . import audio
 from .augmentations import build_augmenter
+from .openmic_dataset_loader import OpenMicDataset
 from .utils import (
     OPENMIC_CLASS_TO_INDEX,
     build_slakh_track_class_intervals,
@@ -758,23 +759,6 @@ class SlakhDataset(Dataset):
         return target
 
 
-class OpenMicDataset(Dataset):
-    def __init__(
-        self,
-        split_cfg: Any,
-        task_type: str,
-        num_classes: int,
-        sample_rate: int,
-        clip_num_samples: int,
-        train_mode: bool,
-        min_activity_ratio: float = 0.1,
-        label_names: Optional[List[str]] = None,
-    ) -> None:
-        raise NotImplementedError(
-            "We need to implement the Dataset object for the openmic dataset here"
-        )
-
-
 def build_dataset(
     split_cfg: Any,
     task_type: str,
@@ -784,6 +768,7 @@ def build_dataset(
     train_mode: bool,
     min_activity_ratio: float = 0.1,
     label_names: Optional[List[str]] = None,
+    relevance_threshold: float = 0.5,
 ) -> Dataset:
     ds_type = get_split_cfg_value(split_cfg, "type")
     # The dataset needs access to the config label names because those names define which
@@ -799,6 +784,7 @@ def build_dataset(
             train_mode=train_mode,
             min_activity_ratio=min_activity_ratio,
             label_names=label_names,
+            relevance_threshold=relevance_threshold,
         )
 
     if ds_type == "openmic":
@@ -809,8 +795,8 @@ def build_dataset(
             sample_rate=sample_rate,
             clip_num_samples=clip_num_samples,
             train_mode=train_mode,
-            min_activity_ratio=min_activity_ratio,
             label_names=label_names,
+            relevance_threshold=relevance_threshold,
         )
 
     raise ValueError(f"Unsupported dataset type: {ds_type}")
@@ -995,6 +981,7 @@ def _run_preview_export_from_cli() -> None:
         train_mode=True,
         min_activity_ratio=cfg.data.min_activity_ratio,
         label_names=cfg.data.label_names,
+        relevance_threshold=cfg.data.relevance_threshold,
     )
     summary_path = export_random_slakh_previews(
         dataset=dataset,
@@ -1008,6 +995,7 @@ def _run_preview_export_from_cli() -> None:
 
 if __name__ == "__main__":
     _run_preview_export_from_cli()
+
 
 """
 python -m training_base.data.datasets \

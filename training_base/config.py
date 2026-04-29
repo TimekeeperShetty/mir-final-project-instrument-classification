@@ -74,6 +74,7 @@ class DataConfig:
     clip_duration_sec: float = 5.0
     label_names: List[str] = field(default_factory=list)
     threshold: float = 0.5
+    relevance_threshold: float = 0.5
     min_activity_ratio: float = 0.1
     loader: LoaderConfig = field(default_factory=LoaderConfig)
     train: Optional[SplitConfig] = None
@@ -179,6 +180,7 @@ def parse_project_config(raw_cfg: Dict[str, Any]) -> ProjectConfig:
         clip_duration_sec=float(data_section.get("clip_duration_sec", 5.0)),
         label_names=list(data_section.get("label_names", [])),
         threshold=float(data_section.get("threshold", 0.5)),
+        relevance_threshold=float(data_section.get("relevance_threshold", 0.5)),
         min_activity_ratio=float(data_section.get("min_activity_ratio", 0.1)),
         loader=base_loader,
         train=_parse_split_config(data_section.get("train"), base_loader),

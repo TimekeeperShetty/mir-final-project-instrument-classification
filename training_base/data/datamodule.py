@@ -65,6 +65,7 @@ class InstrumentDataModule(pl.LightningDataModule):
                 train_mode=True,
                 min_activity_ratio=data_cfg.min_activity_ratio,
                 label_names=data_cfg.label_names,
+                relevance_threshold=data_cfg.relevance_threshold,
             )
             if data_cfg.val is not None:
                 self.val_dataset = build_dataset(
@@ -76,6 +77,7 @@ class InstrumentDataModule(pl.LightningDataModule):
                     train_mode=False,
                     min_activity_ratio=data_cfg.min_activity_ratio,
                     label_names=data_cfg.label_names,
+                    relevance_threshold=data_cfg.relevance_threshold,
                 )
         if stage in (None, "test"):
             if data_cfg.test is not None:
@@ -88,6 +90,7 @@ class InstrumentDataModule(pl.LightningDataModule):
                     train_mode=False,
                     min_activity_ratio=data_cfg.min_activity_ratio,
                     label_names=data_cfg.label_names,
+                    relevance_threshold=data_cfg.relevance_threshold,
                 )
 
     def train_dataloader(self) -> DataLoader:
