@@ -204,6 +204,97 @@ class AudioMAEEncoder(BaseEncoder):
         
  
 
+class ClapEncoder(BaseEncoder):
+    """
+    LAION-CLAP audio encoder (frozen) used as a feature extractor.
+
+    Loads a published `laion_clap.CLAP_Module` checkpoint and returns the
+    512-dim audio embedding produced by the audio branch only (no text branch
+    is used). The backbone is frozen by default; only a trainable classifier
+    head is meant to sit on top of the embedding.
+
+    Input  : raw waveform tensor [B, T] at `sample_rate` Hz (the project's
+             pipeline sample rate; resampled internally to 48 kHz, which is
+             what CLAP was trained on).
+    Output : embedding tensor    [B, output_dim]. When `output_dim == 512`
+             the native CLAP embedding is returned unchanged; otherwise a
+             single Linear projection maps 512 -> output_dim.
+
+    Notes
+    -----
+    - Requires `pip install laion-clap huggingface_hub`.
+    - Checkpoint resolution order:
+        1. `pretrained_path` (explicit local file) wins if set.
+        2. Otherwise `hf_repo` + `hf_filename` are used to fetch (and cache)
+           the checkpoint from HuggingFace via `huggingface_hub.hf_hub_download`.
+        3. If neither is set, falls back to `CLAP_Module.load_ckpt()` with no
+           arguments, which fetches LAION's default 630k-audioset checkpoint.
+    - For instrument classification, the music-pretrained HTSAT-base
+      checkpoint (`music_audioset_epoch_15_esc_90.14.pt` in `lukewys/laion_clap`)
+      is the recommended default and is auto-downloaded on first use.
+    """
+
+    _CLAP_SAMPLE_RATE = 48000
+    _CLAP_EMBED_DIM = 512
+
+    def __init__(
+        self,
+        output_dim: int,
+        sample_rate: int = 22050,
+        amodel: str = "HTSAT-base",
+        enable_fusion: bool = False,
+        pretrained_path: Optional[str] = None,
+        hf_repo: Optional[str] = "lukewys/laion_clap",
+        hf_filename: Optional[str] = "music_audioset_epoch_15_esc_90.14.pt",
+        freeze: bool = True,
+    ) -> None:
+        super().__init__(output_dim=output_dim, input_kind="waveform")
+        import laion_clap
+
+        self.input_sample_rate = sample_rate
+        self.backbone = laion_clap.CLAP_Module(
+            enable_fusion=enable_fusion,
+            amodel=amodel,
+        )
+        ckpt_path = self._resolve_ckpt(pretrained_path, hf_repo, hf_filename)
+        if ckpt_path is not None:
+            self.backbone.load_ckpt(ckpt=ckpt_path)
+        else:
+            self.backbone.load_ckpt()
+        _freeze_module(self.backbone, freeze)
+
+        if sample_rate != self._CLAP_SAMPLE_RATE:
+            self.resample = torchaudio.transforms.Resample(
+                orig_freq=sample_rate,
+                new_freq=self._CLAP_SAMPLE_RATE,
+            )
+        else:
+            self.resample = nn.Identity()
+
+        if output_dim == self._CLAP_EMBED_DIM:
+            self.proj: nn.Module = nn.Identity()
+        else:
+            self.proj = nn.Linear(self._CLAP_EMBED_DIM, output_dim)
+
+    def forward(self, inputs: torch.Tensor, lengths: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = self.resample(inputs.float())
+        embedding = self.backbone.get_audio_embedding_from_data(x=x, use_tensor=True)
+        return self.proj(embedding)
+
+    @staticmethod
+    def _resolve_ckpt(
+        pretrained_path: Optional[str],
+        hf_repo: Optional[str],
+        hf_filename: Optional[str],
+    ) -> Optional[str]:
+        if pretrained_path:
+            return pretrained_path
+        if hf_repo and hf_filename:
+            from huggingface_hub import hf_hub_download
+            return hf_hub_download(repo_id=hf_repo, filename=hf_filename)
+        return None
+
+
 class ExternalEncoder(BaseEncoder):
     """
     Adapter for encoders created elsewhere, e.g. CLAP or AudioMAE.
@@ -264,6 +355,17 @@ def build_encoder(cfg: Any) -> BaseEncoder:
             sample_rate=getattr(cfg, "sample_rate", 16000),
             freeze=getattr(cfg, "freeze", True),
             pooling=getattr(cfg, "pooling", "mean"),
+        )
+    if cfg.type == "clap":
+        return ClapEncoder(
+            output_dim=cfg.output_dim,
+            sample_rate=getattr(cfg, "sample_rate", 22050),
+            amodel=getattr(cfg, "amodel", "HTSAT-base"),
+            enable_fusion=getattr(cfg, "enable_fusion", False),
+            pretrained_path=getattr(cfg, "pretrained_path", None),
+            hf_repo=getattr(cfg, "hf_repo", "lukewys/laion_clap"),
+            hf_filename=getattr(cfg, "hf_filename", "music_audioset_epoch_15_esc_90.14.pt"),
+            freeze=getattr(cfg, "freeze", True),
         )
     if cfg.type == "external":
         if not cfg.factory:

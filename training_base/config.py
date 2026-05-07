@@ -96,10 +96,21 @@ class EncoderConfig:
     factory_kwargs: Dict[str, Any] = field(default_factory=dict)
     model_kwargs: Dict[str, Any] = field(default_factory=dict)
 
-    #lines below are for the mel cnn    
+    #lines below are for the mel cnn
     sample_rate: int = 22050
     n_fft: int = 1024
     n_mels: int = 64
+
+    # CLAP-specific
+    amodel: str = "HTSAT-base"
+    enable_fusion: bool = False
+    pretrained_path: Optional[str] = None
+    hf_repo: Optional[str] = "lukewys/laion_clap"
+    hf_filename: Optional[str] = "music_audioset_epoch_15_esc_90.14.pt"
+
+    # AudioMAE-specific
+    model_name: Optional[str] = None
+    pooling: str = "mean"
 
 
 @dataclass
