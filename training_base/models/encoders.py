@@ -148,6 +148,62 @@ class MelSpectrogramEncoder(BaseEncoder):
         # 5. Project
         return self.proj(x)                     # [Batch, output_dim]
 
+class AudioMAEEncoder(BaseEncoder):
+    """
+    AudioMAE (Masked Autoencoders that Listen) encoder.
+    Loads the HuggingFace `facebook/audiomae-base` checkpoint (ViT-Base,
+    pre-trained on AudioSet with masked autoencoding) and projects its
+    patch-token mean-pool to `output_dim`.
+ 
+    Input  : raw waveform tensor [B, T] at `sample_rate` Hz (default 16 kHz).
+    Output : embedding tensor    [B, output_dim].
+ 
+    The backbone is frozen by default; only the projection head is trained.
+ 
+    Notes
+    -----
+    - AudioMAE was pre-trained with 128 mel bins, 16 kHz, 25 ms / 10 ms
+      windows, so keep `sample_rate=16000` unless you retrain the backbone.
+    - Requires `transformers >= 4.35.0`:  pip install transformers
+    - The model will be downloaded automatically from HuggingFace Hub on first
+      use (~340 MB for ViT-Base).
+    """
+     # AudioMAE pre-training hyper-parameters (do not change unless you are
+     # using a different checkpoint)
+    _N_FFT      = 400
+    _HOP_LENGTH = 160
+    _N_MELS     = 128
+    _F_MIN      = 0.0
+    _F_MAX      = 8000.0
+    _HIDDEN     = 768
+
+    def __init__(self, output_dim, model_name="facebook/audiomae-base", sample_rate=16000, freeze=True, pooling="mean"):
+        super().__init__(output_dim=output_dim, input_kind="waveform")
+        from transformers import AudioMAEModel
+        self.backbone = AudioMAEModel.from_pretrained(model_name)
+        _freeze_module(self.backbone, freeze)
+        self.pooling = pooling
+        self.mel_transform = torchaudio.transforms.MelSpectrogram(
+            sample_rate=sample_rate, n_fft=self._N_FFT, hop_length=self._HOP_LENGTH,
+            n_mels=self._N_MELS, f_min=self._F_MIN, f_max=self._F_MAX,
+            window_fn=torch.hann_window, normalized=False,
+        )
+        self.proj = nn.Sequential(nn.LayerNorm(self._HIDDEN), nn.Linear(self._HIDDEN, output_dim))
+
+    def forward(self, inputs, lengths=None):
+        mel = self.mel_transform(inputs.float())
+        log_mel = (mel + 1e-6).log()
+        mean = log_mel.mean(dim=[1,2], keepdim=True)
+        std  = log_mel.std(dim=[1,2],  keepdim=True)
+        log_mel = (log_mel - mean) / (std + 1e-5)
+        pixel_values = log_mel.permute(0,2,1).unsqueeze(1)
+        hidden = self.backbone(pixel_values=pixel_values).last_hidden_state
+        pooled = hidden[:,0] if self.pooling == "cls" else hidden[:,1:].mean(dim=1)
+        
+        return self.proj(pooled)
+        
+ 
+
 class ExternalEncoder(BaseEncoder):
     """
     Adapter for encoders created elsewhere, e.g. CLAP or AudioMAE.
@@ -200,6 +256,14 @@ def build_encoder(cfg: Any) -> BaseEncoder:
             sample_rate=cfg.sample_rate,
             n_fft=cfg.n_fft,
             n_mels=cfg.n_mels
+        )
+    if cfg.type == "audiomae":
+        return AudioMAEEncoder(
+            output_dim=cfg.output_dim,
+            model_name=getattr(cfg, "model_name", "facebook/audiomae-base"),
+            sample_rate=getattr(cfg, "sample_rate", 16000),
+            freeze=getattr(cfg, "freeze", True),
+            pooling=getattr(cfg, "pooling", "mean"),
         )
     if cfg.type == "external":
         if not cfg.factory:
