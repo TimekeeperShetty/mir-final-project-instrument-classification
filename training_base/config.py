@@ -109,7 +109,7 @@ class EncoderConfig:
     hf_filename: Optional[str] = "music_audioset_epoch_15_esc_90.14.pt"
 
     # AudioMAE-specific
-    model_name: Optional[str] = None
+    model_name: Optional[str] = "hance-ai/audiomae"
     pooling: str = "mean"
 
 

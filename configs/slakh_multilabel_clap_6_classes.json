@@ -1,8 +1,8 @@
 {
   "experiment": {
-    "name": "slakh_to_openmic_clap_6_class_eval",
+    "name": "slakh_openmic_overlap_clap",
     "train_domain": "synthetic",
-    "eval_domain": "real",
+    "eval_domain": "synthetic",
     "run_test_after_fit": true
   },
   "trainer": {
@@ -28,13 +28,12 @@
       "enabled": true,
       "project": "mir-instrument-classification",
       "entity": null,
-      "name": "slakh_to_openmic_clap_6_class_balanced_mixup",
+      "name": "slakh_openmic_overlap_clap_6_class_balanced_mixup",
       "mode": null,
       "tags": [
         "slakh",
-        "openmic",
         "multilabel",
-        "synthetic-to-real",
+        "openmic-overlap",
         "clap"
       ],
       "log_model": false
@@ -52,7 +51,6 @@
     "sample_rate": 22050,
     "clip_duration_sec": 10.0,
     "threshold": 0.5,
-    "relevance_threshold": 0.5,
     "min_activity_ratio": 0.2,
     "label_names": [
       "piano",
@@ -75,10 +73,7 @@
       "input_kind": "waveform",
       "params": {
         "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
-        "split": [
-          "train",
-          "ommited"
-        ],
+        "split": ["train", "ommited"],
         "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
         "stem_remix": true,
         "include_context_stems": true,
@@ -102,26 +97,26 @@
       }
     },
     "val": {
-      "type": "openmic",
-      "domain": "real",
+      "type": "slakh",
+      "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018",
-        "split_file": "/scratch/mg8253/partitions_custom_6class/val.txt",
-        "relevance_threshold": 0.5
+        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
+        "split": "vallidation",
+        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt"
       },
       "loader": {
         "drop_last": false
       }
     },
     "test": {
-      "type": "openmic",
-      "domain": "real",
+      "type": "slakh",
+      "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018",
-        "split_file": "/scratch/mg8253/partitions_custom_6class/test.txt",
-        "relevance_threshold": 0.5
+        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
+        "split": "test",
+        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt"
       },
       "loader": {
         "drop_last": false

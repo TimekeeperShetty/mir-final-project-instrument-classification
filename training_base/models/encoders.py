@@ -150,10 +150,12 @@ class MelSpectrogramEncoder(BaseEncoder):
 
 class AudioMAEEncoder(BaseEncoder):
     """
-    AudioMAE (Masked Autoencoders that Listen) encoder.
-    Loads the HuggingFace `facebook/audiomae-base` checkpoint (ViT-Base,
-    pre-trained on AudioSet with masked autoencoding) and projects its
-    patch-token mean-pool to `output_dim`.
+    AudioMAE encoder backed by a Hugging Face custom-code checkpoint.
+
+    We use a checkpoint that exposes an encoder through `AutoModel(...,
+    trust_remote_code=True)` rather than relying on a built-in
+    `transformers.AudioMAEModel` class. The model returns a latent map with
+    preserved time/frequency structure, which we pool for classification.
  
     Input  : raw waveform tensor [B, T] at `sample_rate` Hz (default 16 kHz).
     Output : embedding tensor    [B, output_dim].
@@ -162,44 +164,82 @@ class AudioMAEEncoder(BaseEncoder):
  
     Notes
     -----
-    - AudioMAE was pre-trained with 128 mel bins, 16 kHz, 25 ms / 10 ms
-      windows, so keep `sample_rate=16000` unless you retrain the backbone.
-    - Requires `transformers >= 4.35.0`:  pip install transformers
-    - The model will be downloaded automatically from HuggingFace Hub on first
-      use (~340 MB for ViT-Base).
+    - The current default checkpoint is `hance-ai/audiomae`.
+    - The checkpoint expects audio up to 10 seconds and is designed around
+      16 kHz mono input, so keep `sample_rate=16000`.
+    - Requires `transformers`, `timm`, and `einops`, because the Hugging Face
+      checkpoint ships custom code.
     """
-     # AudioMAE pre-training hyper-parameters (do not change unless you are
-     # using a different checkpoint)
-    _N_FFT      = 400
-    _HOP_LENGTH = 160
-    _N_MELS     = 128
-    _F_MIN      = 0.0
-    _F_MAX      = 8000.0
     _HIDDEN     = 768
+    _TARGET_SAMPLE_RATE = 16000
+    _MAX_AUDIO_SECONDS = 10.0
 
-    def __init__(self, output_dim, model_name="facebook/audiomae-base", sample_rate=16000, freeze=True, pooling="mean"):
+    def __init__(self, output_dim, model_name="hance-ai/audiomae", sample_rate=16000, freeze=True, pooling="mean"):
         super().__init__(output_dim=output_dim, input_kind="waveform")
-        from transformers import AudioMAEModel
-        self.backbone = AudioMAEModel.from_pretrained(model_name)
+        from transformers import AutoModel
+
+        self.input_sample_rate = sample_rate
+        self.backbone = AutoModel.from_pretrained(model_name, trust_remote_code=True)
         _freeze_module(self.backbone, freeze)
         self.pooling = pooling
-        self.mel_transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=sample_rate, n_fft=self._N_FFT, hop_length=self._HOP_LENGTH,
-            n_mels=self._N_MELS, f_min=self._F_MIN, f_max=self._F_MAX,
-            window_fn=torch.hann_window, normalized=False,
-        )
+
+        if sample_rate != self._TARGET_SAMPLE_RATE:
+            self.resample = torchaudio.transforms.Resample(
+                orig_freq=sample_rate,
+                new_freq=self._TARGET_SAMPLE_RATE,
+            )
+        else:
+            self.resample = nn.Identity()
+
         self.proj = nn.Sequential(nn.LayerNorm(self._HIDDEN), nn.Linear(self._HIDDEN, output_dim))
 
+    def _encode_batch_to_latent_map(self, inputs: torch.Tensor) -> torch.Tensor:
+        # The custom checkpoint exposes its real AudioMAE implementation under
+        # `model.encoder`. We use that lower-level path directly so we can feed
+        # in-memory waveforms from our dataloader instead of forcing every batch
+        # through a temporary audio file on disk.
+        encoder = getattr(self.backbone, "encoder", None)
+        if encoder is None:
+            raise AttributeError(
+                "The loaded AudioMAE checkpoint does not expose `.encoder`. "
+                "Please use a checkpoint compatible with hance-ai/audiomae."
+            )
+
+        x = self.resample(inputs.float())
+        max_num_samples = int(self._TARGET_SAMPLE_RATE * self._MAX_AUDIO_SECONDS)
+        if x.shape[-1] > max_num_samples:
+            x = x[..., :max_num_samples]
+
+        melspecs = []
+        for waveform in x:
+            mono_waveform = waveform.unsqueeze(0)
+            melspec = encoder.waveform_to_melspec(mono_waveform.cpu())
+            melspecs.append(melspec)
+
+        backbone_device = next(self.backbone.parameters()).device
+        melspec_batch = torch.stack(melspecs, dim=0).unsqueeze(1).to(backbone_device)
+        token_features = encoder.forward_features(melspec_batch)
+        token_features = token_features[:, 1:, :]
+
+        _, _, width, height = melspec_batch.shape
+        width_prime = round(width / encoder.patch_embed.patch_size[0])
+        height_prime = round(height / encoder.patch_embed.patch_size[1])
+        latent_map = token_features.transpose(1, 2).reshape(
+            token_features.shape[0],
+            token_features.shape[-1],
+            height_prime,
+            width_prime,
+        )
+        return latent_map
+
     def forward(self, inputs, lengths=None):
-        mel = self.mel_transform(inputs.float())
-        log_mel = (mel + 1e-6).log()
-        mean = log_mel.mean(dim=[1,2], keepdim=True)
-        std  = log_mel.std(dim=[1,2],  keepdim=True)
-        log_mel = (log_mel - mean) / (std + 1e-5)
-        pixel_values = log_mel.permute(0,2,1).unsqueeze(1)
-        hidden = self.backbone(pixel_values=pixel_values).last_hidden_state
-        pooled = hidden[:,0] if self.pooling == "cls" else hidden[:,1:].mean(dim=1)
-        
+        latent_map = self._encode_batch_to_latent_map(inputs)
+        if self.pooling == "mean":
+            pooled = latent_map.mean(dim=[2, 3])
+        elif self.pooling == "max":
+            pooled = latent_map.amax(dim=[2, 3])
+        else:
+            raise ValueError(f"Unsupported AudioMAE pooling mode: {self.pooling!r}")
         return self.proj(pooled)
         
  

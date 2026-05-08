@@ -60,6 +60,7 @@ class SlakhDataset(Dataset):
         train_mode: bool,
         min_activity_ratio: float = 0.1,
         label_names: Optional[List[str]] = None,
+        relevance_threshold: float = 0.5,
     ) -> None:
         #we basically at the moment allow 2 tasks multilabel and multiclass, but we are mainly training for 
         #multilabel throughout
@@ -92,6 +93,14 @@ class SlakhDataset(Dataset):
         
         # The configured experiment label list, typically an OpenMIC subset
         self.label_names = list(label_names or [])
+
+        # This argument is only meaningful for OpenMIC, where aggregated relevance
+        # scores must be thresholded into binary labels.
+        #
+        # We still accept it here because build_dataset(...) uses one shared call
+        # signature for both Slakh and OpenMIC. Keeping the constructor compatible
+        # avoids special-case branching in that shared builder path.
+        self.relevance_threshold = relevance_threshold
         
         # Map from class name to the final target index used by the model.
         self.class_name_to_index: Dict[str, int] = {}
@@ -854,18 +863,24 @@ def _build_positive_stem_reports(
     return stem_reports
 
 
-def _save_audio_with_mp3_fallback(audio_tensor: torch.Tensor, sample_rate: int, output_path: Path) -> Path:
+def _save_audio_preview(audio_tensor: torch.Tensor, sample_rate: int, output_path: Path) -> Path:
     if audio.torchaudio is None:
         raise ImportError("torchaudio is required to export preview audio")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        audio.torchaudio.save(str(output_path), audio_tensor.unsqueeze(0), sample_rate, format="mp3")
-        return output_path
-    except Exception:
-        fallback_path = output_path.with_suffix(".wav")
-        audio.torchaudio.save(str(fallback_path), audio_tensor.unsqueeze(0), sample_rate)
-        return fallback_path
+    # We intentionally save previews as WAV here.
+    #
+    # Why not MP3:
+    # in some environments torchaudio routes MP3 encoding through TorchCodec,
+    # and that path can crash inside the native encoder for some particular
+    # waveforms. Since those crashes abort the whole Python process, they are
+    # not catchable in the normal "try MP3 then fall back" style.
+    #
+    # WAV is much safer for this dataset-preview utility and preserves the exact
+    # waveform we want to inspect.
+    wav_path = output_path.with_suffix(".wav")
+    audio.torchaudio.save(str(wav_path), audio_tensor.unsqueeze(0), sample_rate)
+    return wav_path
 
 
 def export_random_slakh_previews(
@@ -898,7 +913,7 @@ def export_random_slakh_previews(
         ]
 
         example_dir = output_dir / f"example_{export_idx:02d}_{track_dir.name}"
-        mix_path = _save_audio_with_mp3_fallback(excerpt, dataset.sample_rate, example_dir / "mix.mp3")
+        mix_path = _save_audio_preview(excerpt, dataset.sample_rate, example_dir / "mix.wav")
 
         stem_entries = []
         stem_lookup = {stem["stem_id"]: stem for stem in item.get("stems", [])}
@@ -908,10 +923,10 @@ def export_random_slakh_previews(
             if stem is None:
                 continue
             stem_audio = dataset._load_stem_excerpt(stem, int(debug_payload["offset"]))
-            stem_path = _save_audio_with_mp3_fallback(
+            stem_path = _save_audio_preview(
                 stem_audio,
                 dataset.sample_rate,
-                example_dir / f"{stem_report.get('role', 'target')}_{stem_report['class_name']}_{stem_report['stem_id']}.mp3",
+                example_dir / f"{stem_report.get('role', 'target')}_{stem_report['class_name']}_{stem_report['stem_id']}.wav",
             )
             stem_entries.append(
                 {
