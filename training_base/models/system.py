@@ -87,15 +87,50 @@ class DomainTransferSystem(pl.LightningModule):
 
     def _shared_step(self, batch):
         #Shared forward + loss path. Good place to customize task logic.
+        self._assert_finite(batch["inputs"], "batch inputs")
+        self._assert_finite(batch["targets"], "batch targets")
         logits = self(batch["inputs"], batch.get("lengths"))
+        self._assert_finite(logits, "model logits")
         if self.task_type == "multiclass":
             targets = batch["targets"].long()
             loss = F.cross_entropy(logits, targets)
+            self._assert_finite(loss, "multiclass loss")
             return logits, loss
 
         targets = batch["targets"].float()
         loss = F.binary_cross_entropy_with_logits(logits, targets)
+        self._assert_finite(loss, "multilabel loss")
         return logits, loss
+
+    def _assert_finite(self, tensor: torch.Tensor, name: str) -> None:
+        if torch.isfinite(tensor).all():
+            return
+        bad_mask = ~torch.isfinite(tensor)
+        bad_count = int(bad_mask.sum().item())
+        total = int(tensor.numel())
+        tensor_cpu = tensor.detach().float().cpu()
+        finite_mask_cpu = torch.isfinite(tensor_cpu)
+        finite_values = tensor_cpu[finite_mask_cpu]
+        if finite_values.numel() > 0:
+            finite_min = float(finite_values.min().item())
+            finite_max = float(finite_values.max().item())
+            finite_mean = float(finite_values.mean().item())
+            finite_std = float(finite_values.std(unbiased=False).item())
+        else:
+            finite_min = float("nan")
+            finite_max = float("nan")
+            finite_mean = float("nan")
+            finite_std = float("nan")
+
+        bad_indices = bad_mask.detach().cpu().nonzero(as_tuple=False)[:10].tolist()
+        print(
+            "[system] non-finite tensor detected "
+            f"name={name} shape={tuple(tensor.shape)} dtype={tensor.dtype} "
+            f"bad={bad_count}/{total} finite_min={finite_min:.6f} "
+            f"finite_max={finite_max:.6f} finite_mean={finite_mean:.6f} "
+            f"finite_std={finite_std:.6f} sample_bad_indices={bad_indices}"
+        )
+        raise RuntimeError(f"Non-finite values detected in {name}: {bad_count}/{total} elements")
 
     def _log_epoch_metrics(self, state: Dict[str, torch.Tensor], prefix: str) -> None:
         if not state:

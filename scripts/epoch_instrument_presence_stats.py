@@ -121,6 +121,7 @@ def compute_split_stats(
         total_active_labels += int(binary_targets.sum().item())
         empty_target_examples += int((binary_targets.sum(dim=1) == 0).sum().item())
         batches += 1
+        del batch
 
     instruments: Dict[str, Dict[str, float]] = {}
     for class_idx, class_name in enumerate(label_names):

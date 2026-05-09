@@ -1,9 +1,9 @@
 {
   "experiment": {
-    "name": "slakh_openmic_overlap_audiomae",
+    "name": "stats_slakh_clap_fullmix_valnatural",
     "train_domain": "synthetic",
     "eval_domain": "synthetic",
-    "run_test_after_fit": true
+    "run_test_after_fit": false
   },
   "trainer": {
     "seed": 42,
@@ -25,22 +25,24 @@
   },
   "logging": {
     "wandb": {
-      "enabled": true,
+      "enabled": false,
       "project": "mir-instrument-classification",
       "entity": null,
-      "name": "slakh_openmic_overlap_audiomae_6_class_balanced_mixup",
+      "name": "stats_slakh_clap_fullmix_valnatural",
       "mode": null,
       "tags": [
+        "stats",
         "slakh",
         "multilabel",
-        "openmic-overlap",
-        "audiomae"
+        "clap",
+        "fullmix",
+        "val-natural"
       ],
       "log_model": false
     },
     "val_demos": {
-      "enabled": true,
-      "count": 8,
+      "enabled": false,
+      "count": 0,
       "seed": 42,
       "every_n_epochs": 1
     }
@@ -48,7 +50,7 @@
   "data": {
     "task_type": "multilabel",
     "num_classes": 6,
-    "sample_rate": 16000,
+    "sample_rate": 22050,
     "clip_duration_sec": 10.0,
     "threshold": 0.5,
     "min_activity_ratio": 0.2,
@@ -73,23 +75,16 @@
       "input_kind": "waveform",
       "params": {
         "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
-        "split": ["train", "ommited"],
+        "split": [
+          "train",
+          "ommited"
+        ],
         "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
-        "stem_remix": true,
-        "include_context_stems": true,
-        "context_stem_keep_prob": 0.7,
-        "max_context_stems": 4,
-        "max_stems_per_class": 2,
-        "class_keep_exponent": 0.5,
-        "class_keep_prob_min": 0.25,
-        "min_classes_per_crop": 2,
-        "remix_resample_attempts": 4,
-        "normalize_submix": true
+        "stem_remix": false
       },
       "augmentations": {
         "stem": {
-          "type": "example_waveform",
-          "random_gain_db": 3.0
+          "type": "identity"
         },
         "mix": {
           "type": "identity"
@@ -103,21 +98,7 @@
       "params": {
         "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
         "split": "vallidation",
-        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
-
-        "stem_remix": true,
-        "deterministic_remix": true,
-        "remix_seed": 42,
-
-        "include_context_stems": true,
-        "context_stem_keep_prob": 0.7,
-        "max_context_stems": 4,
-        "max_stems_per_class": 2,
-        "class_keep_exponent": 0.5,
-        "class_keep_prob_min": 0.25,
-        "min_classes_per_crop": 2,
-        "remix_resample_attempts": 4,
-        "normalize_submix": true
+        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt"
       },
       "loader": {
         "drop_last": false
@@ -138,13 +119,15 @@
     }
   },
   "encoder": {
-    "type": "audiomae",
+    "type": "clap",
     "input_kind": "waveform",
-    "output_dim": 128,
+    "output_dim": 512,
     "freeze": true,
-    "sample_rate": 16000,
-    "model_name": "hance-ai/audiomae",
-    "pooling": "mean"
+    "sample_rate": 22050,
+    "amodel": "HTSAT-base",
+    "enable_fusion": false,
+    "hf_repo": "lukewys/laion_clap",
+    "hf_filename": "music_audioset_epoch_15_esc_90.14.pt"
   },
   "classifier": {
     "type": "mlp",

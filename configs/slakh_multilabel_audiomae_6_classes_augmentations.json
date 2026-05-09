@@ -121,7 +121,21 @@
       "params": {
         "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
         "split": "vallidation",
-        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt"
+        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
+
+        "stem_remix": true,
+        "deterministic_remix": true,
+        "remix_seed": 42,
+
+        "include_context_stems": true,
+        "context_stem_keep_prob": 0.7,
+        "max_context_stems": 4,
+        "max_stems_per_class": 2,
+        "class_keep_exponent": 0.5,
+        "class_keep_prob_min": 0.25,
+        "min_classes_per_crop": 2,
+        "remix_resample_attempts": 4,
+        "normalize_submix": true
       },
       "loader": {
         "drop_last": false

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import argparse
+import hashlib
 import json
 import random
 from pathlib import Path
@@ -154,6 +155,8 @@ class SlakhDataset(Dataset):
         
         # Enable the on-the-fly stem remix path only when requested
         self.stem_remix_enabled = bool(params.get("stem_remix", self.train_mode and task_type == "multilabel"))
+        self.deterministic_remix = bool(params.get("deterministic_remix", False))
+        self.remix_seed = int(params.get("remix_seed", 0))
 
         # We optionally allow extra non-target stems to be added into the training submix.
         #
@@ -418,16 +421,49 @@ class SlakhDataset(Dataset):
         duration_sec = float(item["duration_sec"])
         return max(1, int(round(duration_sec * self.sample_rate)))
 
-    def _sample_crop_offset(self, item: Dict[str, Any]) -> int:
+    def _make_item_generator(
+        self,
+        item: Dict[str, Any],
+        dataset_index: Optional[int],
+    ) -> Optional[torch.Generator]:
+        if not self.deterministic_remix:
+            return None
+
+        sample_key = str(item.get("sample_id") or item.get("track_id") or dataset_index or "unknown")
+        seed_material = f"{self.remix_seed}|{self.domain}|{sample_key}|{dataset_index}"
+        digest = hashlib.sha256(seed_material.encode("utf-8")).digest()
+        seed_value = int.from_bytes(digest[:8], byteorder="big", signed=False) % (2**63 - 1)
+        return torch.Generator().manual_seed(seed_value)
+
+    @staticmethod
+    def _rand_unit(generator: Optional[torch.Generator]) -> float:
+        if generator is None:
+            return float(torch.rand(1).item())
+        return float(torch.rand(1, generator=generator).item())
+
+    @staticmethod
+    def _randperm(length: int, generator: Optional[torch.Generator]) -> List[int]:
+        if generator is None:
+            return torch.randperm(length).tolist()
+        return torch.randperm(length, generator=generator).tolist()
+
+    def _sample_crop_offset(
+        self,
+        item: Dict[str, Any],
+        *,
+        generator: Optional[torch.Generator] = None,
+    ) -> int:
         # Convert cached duration into the crop-start search range.
         total_num_samples = self._get_track_num_samples(item)
         if total_num_samples <= self.clip_num_samples:
             # Short tracks always start at zero and get padded later if needed.
             return 0
         max_offset = total_num_samples - self.clip_num_samples
-        if self.train_mode:
+        if self.train_mode or generator is not None:
             # Training uses a random crop start.
-            return int(torch.randint(0, max_offset + 1, size=(1,)).item())
+            if generator is None:
+                return int(torch.randint(0, max_offset + 1, size=(1,)).item())
+            return int(torch.randint(0, max_offset + 1, size=(1,), generator=generator).item())
         # Validation/test use a deterministic center crop.
         return max_offset // 2
 
@@ -480,6 +516,8 @@ class SlakhDataset(Dataset):
     def _choose_context_stems(
         self,
         active_context_by_class: Dict[str, List[Dict[str, Any]]],
+        *,
+        generator: Optional[torch.Generator] = None,
     ) -> List[Dict[str, Any]]:
         # Context stems are optional background distractors. They should make the audio
         # more realistic, but they should not dominate the mixture.
@@ -489,19 +527,24 @@ class SlakhDataset(Dataset):
         candidate_stems: List[Dict[str, Any]] = []
         for stems in active_context_by_class.values():
             for stem in stems:
-                if torch.rand(1).item() <= self.context_stem_keep_prob:
+                if self._rand_unit(generator) <= self.context_stem_keep_prob:
                     candidate_stems.append(stem)
 
         if not candidate_stems:
             return []
 
         if self.max_context_stems > 0 and len(candidate_stems) > self.max_context_stems:
-            permutation = torch.randperm(len(candidate_stems)).tolist()
+            permutation = self._randperm(len(candidate_stems), generator)
             candidate_stems = [candidate_stems[index] for index in permutation[: self.max_context_stems]]
 
         return candidate_stems
 
-    def _choose_classes_for_submix(self, active_by_class: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+    def _choose_classes_for_submix(
+        self,
+        active_by_class: Dict[str, List[Dict[str, Any]]],
+        *,
+        generator: Optional[torch.Generator] = None,
+    ) -> List[str]:
         # Start from the classes that are genuinely active in this crop.
         active_classes = list(active_by_class.keys())
         if not active_classes:
@@ -512,7 +555,7 @@ class SlakhDataset(Dataset):
         for class_name in active_classes:
             # Frequent classes like piano/guitar/drums usually get a lower keep probability.
             keep_prob = self.class_keep_probabilities.get(class_name, 1.0)
-            if torch.rand(1).item() <= keep_prob:
+            if self._rand_unit(generator) <= keep_prob:
                 kept_classes.append(class_name)
             else:
                 dropped_classes.append(class_name)
@@ -540,12 +583,17 @@ class SlakhDataset(Dataset):
             )[: self.max_classes_per_crop]
         return kept_classes
 
-    def _choose_stems_for_class(self, stems: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _choose_stems_for_class(
+        self,
+        stems: List[Dict[str, Any]],
+        *,
+        generator: Optional[torch.Generator] = None,
+    ) -> List[Dict[str, Any]]:
         # If the class already has few stems, keep them all.
         if len(stems) <= self.max_stems_per_class:
             return stems
         # Otherwise randomly keep only a subset.
-        permutation = torch.randperm(len(stems)).tolist()
+        permutation = self._randperm(len(stems), generator)
         return [stems[index] for index in permutation[: self.max_stems_per_class]]
 
     def _load_stem_excerpt(self, stem: Dict[str, Any], offset: int) -> torch.Tensor:
@@ -577,11 +625,30 @@ class SlakhDataset(Dataset):
 
         # Apply optional mix-level augmentation after summing stems.
         mixture = self.mix_augmenter(mixture)
+        if not torch.isfinite(mixture).all():
+            bad_indices = (~torch.isfinite(mixture)).nonzero(as_tuple=False)[:5].tolist()
+            finite_values = mixture[torch.isfinite(mixture)]
+            if finite_values.numel() > 0:
+                finite_min = float(finite_values.min().item())
+                finite_max = float(finite_values.max().item())
+            else:
+                finite_min = float("nan")
+                finite_max = float("nan")
+            print(
+                "[datasets] non-finite submix before sanitize "
+                f"offset={offset} "
+                f"selected_stems={len(selected_stems)} shape={tuple(mixture.shape)} "
+                f"finite_min={finite_min:.6f} finite_max={finite_max:.6f} "
+                f"stem_ids={[stem.get('stem_id') for stem in selected_stems[:5]]} "
+                f"stem_classes={[stem.get('class_name') for stem in selected_stems[:5]]} "
+                f"sample_bad_indices={bad_indices}"
+            )
+        mixture = torch.nan_to_num(mixture, nan=0.0, posinf=1.0, neginf=-1.0)
         if self.normalize_submix:
             # Peak-normalize to avoid very large amplitudes when many stems are summed.
             peak = mixture.abs().max().clamp_min(1e-6)
             mixture = mixture / peak
-        return mixture.float()
+        return torch.nan_to_num(mixture.float(), nan=0.0, posinf=1.0, neginf=-1.0)
 
     def _build_submix_target(self, kept_classes: List[str]) -> torch.Tensor:
         # Build the final multi-hot target from the classes that survived the remix.
@@ -595,21 +662,24 @@ class SlakhDataset(Dataset):
     def _build_multilabel_excerpt_and_target(
         self,
         item: Dict[str, Any],
+        dataset_index: Optional[int] = None,
         *,
         export_debug: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
         # We return debug metadata too, because the preview/export tool reuses this path.
         debug_payload: Dict[str, Any] = {}
+        remix_active = self.stem_remix_enabled and (self.train_mode or self.deterministic_remix)
+        generator = self._make_item_generator(item, dataset_index) if remix_active else None
         # During training we can retry a few different random crops if the first one is bad.
-        attempts = self.remix_resample_attempts if self.stem_remix_enabled and self.train_mode else 1
+        attempts = self.remix_resample_attempts if remix_active else 1
 
         for _ in range(attempts):
             # Pick a crop start in samples, then convert it to seconds for MIDI overlap checks.
-            offset = self._sample_crop_offset(item)
+            offset = self._sample_crop_offset(item, generator=generator if remix_active else None)
             crop_start_sec = offset / self.sample_rate
             crop_end_sec = crop_start_sec + (self.clip_num_samples / self.sample_rate)
 
-            if not (self.stem_remix_enabled and self.train_mode):
+            if not remix_active:
                 # Val/test, or training without remix, uses the original Slakh full mix crop.
                 waveform = audio.load_waveform(str(item["audio_path"]), self.sample_rate)
                 excerpt = audio.trim_or_pad(
@@ -638,11 +708,13 @@ class SlakhDataset(Dataset):
                 continue
 
             # Drop some classes probabilistically to reduce dominance of common classes.
-            kept_classes = self._choose_classes_for_submix(active_by_class)
+            kept_classes = self._choose_classes_for_submix(active_by_class, generator=generator)
             selected_target_stems: List[Dict[str, Any]] = []
             for class_name in kept_classes:
                 # Even inside one class, limit how many stems survive.
-                selected_target_stems.extend(self._choose_stems_for_class(active_by_class[class_name]))
+                selected_target_stems.extend(
+                    self._choose_stems_for_class(active_by_class[class_name], generator=generator)
+                )
 
             if not selected_target_stems:
                 # If everything was removed, try another crop.
@@ -653,7 +725,7 @@ class SlakhDataset(Dataset):
                 crop_start_sec,
                 crop_end_sec,
             )
-            selected_context_stems = self._choose_context_stems(active_context_by_class)
+            selected_context_stems = self._choose_context_stems(active_context_by_class, generator=generator)
 
             selected_stems = list(selected_target_stems) + list(selected_context_stems)
 
@@ -667,7 +739,7 @@ class SlakhDataset(Dataset):
                 "offset": offset,
                 "crop_start_sec": crop_start_sec,
                 "crop_end_sec": crop_end_sec,
-                "mode": "stem_submix",
+                "mode": "stem_submix" if self.train_mode else "stem_submix_deterministic",
                 "kept_classes": kept_classes,
                 "num_context_stems": len(selected_context_stems),
                 "selected_stems": [
@@ -735,7 +807,7 @@ class SlakhDataset(Dataset):
         else:
             # Multilabel mode either uses the original full mix crop or builds a synthetic
             # submix from a subset of active stems, depending on the remix settings.
-            excerpt, target, _ = self._build_multilabel_excerpt_and_target(item)
+            excerpt, target, _ = self._build_multilabel_excerpt_and_target(item, dataset_index=idx)
 
         # The datamodule collate function expects this exact dictionary structure.
         return {

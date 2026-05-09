@@ -4,24 +4,57 @@ from typing import Any, Dict
 
 import torch
 
-try:
-    import numpy as np
-    from pedalboard import Chorus, Gain, HighpassFilter, LowpassFilter, Pedalboard, Reverb
-except ImportError:  # pragma: no cover - depends on local environment
-    np = None
-    Chorus = None
-    Gain = None
-    HighpassFilter = None
-    LowpassFilter = None
-    Pedalboard = None
-    Reverb = None
+
+import numpy as np
+from pedalboard import Chorus, Gain, HighpassFilter, LowpassFilter, Pedalboard, Reverb
+
+_MAX_SANITIZE_WARNINGS = 8
+_sanitize_warning_count = 0
 
 
 class IdentityAugmenter:
     """Default no-op augmenter."""
 
     def __call__(self, waveform: torch.Tensor) -> torch.Tensor:
-        return waveform.float()
+        return _sanitize_waveform_tensor(waveform.float())
+
+
+def _sanitize_waveform_tensor(waveform: torch.Tensor) -> torch.Tensor:
+    _maybe_print_sanitize_warning(waveform, context="waveform")
+    return torch.nan_to_num(waveform.float(), nan=0.0, posinf=1.0, neginf=-1.0)
+
+
+def _maybe_print_sanitize_warning(waveform: torch.Tensor, *, context: str) -> None:
+    global _sanitize_warning_count
+    if _sanitize_warning_count >= _MAX_SANITIZE_WARNINGS:
+        return
+
+    waveform = waveform.detach()
+    finite_mask = torch.isfinite(waveform)
+    if finite_mask.all():
+        return
+
+    bad_count = int((~finite_mask).sum().item())
+    total = int(waveform.numel())
+    finite_values = waveform[finite_mask]
+    if finite_values.numel() > 0:
+        finite_min = float(finite_values.min().item())
+        finite_max = float(finite_values.max().item())
+        finite_mean = float(finite_values.mean().item())
+    else:
+        finite_min = float("nan")
+        finite_max = float("nan")
+        finite_mean = float("nan")
+
+    bad_indices = (finite_mask == 0).nonzero(as_tuple=False)[:5].tolist()
+    print(
+        "[augmentations] sanitized non-finite waveform "
+        f"context={context} shape={tuple(waveform.shape)} "
+        f"bad={bad_count}/{total} finite_min={finite_min:.6f} "
+        f"finite_max={finite_max:.6f} finite_mean={finite_mean:.6f} "
+        f"sample_bad_indices={bad_indices}"
+    )
+    _sanitize_warning_count += 1
 
 
 class ExampleWaveformAugmenter:
@@ -43,7 +76,7 @@ class ExampleWaveformAugmenter:
         if self.normalize:
             peak = x.abs().max().clamp_min(1e-6)
             x = x / peak
-        return x
+        return _sanitize_waveform_tensor(x)
 
     def _random_gain(self, waveform: torch.Tensor) -> torch.Tensor:
         gain_db = torch.empty(1).uniform_(-self.random_gain_db, self.random_gain_db).item()
@@ -168,11 +201,12 @@ class ReverbNoiseAugmenter:
         if self.noise_std > 0 and np.random.uniform(0.0, 1.0) <= self.noise_prob:
             noise = np.random.normal(0.0, self.noise_std, effected.shape).astype(np.float32)
             effected = effected + noise
+        effected = np.nan_to_num(effected, nan=0.0, posinf=1.0, neginf=-1.0)
         effected = np.clip(effected, -1.0, 1.0)
 
         if squeeze:
             effected = effected.squeeze(0)
-        return torch.from_numpy(effected).float()
+        return _sanitize_waveform_tensor(torch.from_numpy(effected).float())
 
 
 def build_augmenter(cfg: Dict[str, Any] | None):
