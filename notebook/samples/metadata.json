@@ -1,0 +1,182 @@
+[
+  {
+    "export_index": 1,
+    "sample_key": "068893_7680",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/068/068893_7680.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/01_068893_7680.wav",
+    "positive_labels": [
+      "synthesizer"
+    ]
+  },
+  {
+    "export_index": 2,
+    "sample_key": "056571_1255680",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/056/056571_1255680.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/02_056571_1255680.wav",
+    "positive_labels": [
+      "violin"
+    ]
+  },
+  {
+    "export_index": 3,
+    "sample_key": "019706_0",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/019/019706_0.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/03_019706_0.wav",
+    "positive_labels": [
+      "guitar"
+    ]
+  },
+  {
+    "export_index": 4,
+    "sample_key": "071317_84480",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/071/071317_84480.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/04_071317_84480.wav",
+    "positive_labels": [
+      "guitar"
+    ]
+  },
+  {
+    "export_index": 5,
+    "sample_key": "070934_142080",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/070/070934_142080.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/05_070934_142080.wav",
+    "positive_labels": [
+      "piano"
+    ]
+  },
+  {
+    "export_index": 6,
+    "sample_key": "107068_145920",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/107/107068_145920.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/06_107068_145920.wav",
+    "positive_labels": [
+      "synthesizer"
+    ]
+  },
+  {
+    "export_index": 7,
+    "sample_key": "085173_103680",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/085/085173_103680.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/07_085173_103680.wav",
+    "positive_labels": [
+      "synthesizer"
+    ]
+  },
+  {
+    "export_index": 8,
+    "sample_key": "036074_629760",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/036/036074_629760.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/08_036074_629760.wav",
+    "positive_labels": [
+      "synthesizer"
+    ]
+  },
+  {
+    "export_index": 9,
+    "sample_key": "048314_153600",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/048/048314_153600.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/09_048314_153600.wav",
+    "positive_labels": [
+      "synthesizer"
+    ]
+  },
+  {
+    "export_index": 10,
+    "sample_key": "032442_249600",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/032/032442_249600.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/10_032442_249600.wav",
+    "positive_labels": [
+      "violin"
+    ]
+  },
+  {
+    "export_index": 11,
+    "sample_key": "149309_184320",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/149/149309_184320.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/11_149309_184320.wav",
+    "positive_labels": [
+      "violin"
+    ]
+  },
+  {
+    "export_index": 12,
+    "sample_key": "005623_203520",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/005/005623_203520.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/12_005623_203520.wav",
+    "positive_labels": [
+      "violin"
+    ]
+  },
+  {
+    "export_index": 13,
+    "sample_key": "082261_42240",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/082/082261_42240.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/13_082261_42240.wav",
+    "positive_labels": [
+      "violin"
+    ]
+  },
+  {
+    "export_index": 14,
+    "sample_key": "032523_42240",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/032/032523_42240.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/14_032523_42240.wav",
+    "positive_labels": [
+      "guitar"
+    ]
+  },
+  {
+    "export_index": 15,
+    "sample_key": "085834_119040",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/085/085834_119040.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/15_085834_119040.wav",
+    "positive_labels": [
+      "drums"
+    ]
+  },
+  {
+    "export_index": 16,
+    "sample_key": "108085_138240",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/108/108085_138240.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/16_108085_138240.wav",
+    "positive_labels": [
+      "violin"
+    ]
+  },
+  {
+    "export_index": 17,
+    "sample_key": "084888_0",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/084/084888_0.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/17_084888_0.wav",
+    "positive_labels": [
+      "violin"
+    ]
+  },
+  {
+    "export_index": 18,
+    "sample_key": "154196_230400",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/154/154196_230400.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/18_154196_230400.wav",
+    "positive_labels": [
+      "drums"
+    ]
+  },
+  {
+    "export_index": 19,
+    "sample_key": "057543_42240",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/057/057543_42240.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/19_057543_42240.wav",
+    "positive_labels": [
+      "synthesizer"
+    ]
+  },
+  {
+    "export_index": 20,
+    "sample_key": "118020_303360",
+    "source_audio_path": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018/audio/118/118020_303360.ogg",
+    "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/20_118020_303360.wav",
+    "positive_labels": [
+      "drums"
+    ]
+  }
+]
