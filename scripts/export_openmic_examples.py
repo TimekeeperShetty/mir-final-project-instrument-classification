@@ -7,7 +7,7 @@ import json
 import random
 import sys
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Tuple
 
 import torch
 
@@ -18,7 +18,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from training_base.config import load_json, parse_project_config
 from training_base.data import audio as audio_utils
-from training_base.data.openmic_dataset_loader import OpenMicDataset
+from training_base.data.openmic_dataset_loader import (
+    CORRUPTED_SAMPLE_KEYS,
+    OPENMIC_NAME_ALIASES,
+    OpenMicDataset,
+)
 
 try:
     import torchaudio
@@ -44,7 +48,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_dataset(args: argparse.Namespace) -> tuple[OpenMicDataset, List[str], int]:
+def canonicalize_instrument_name(name: str) -> str:
+    normalized = str(name).strip().lower().replace(" ", "_").replace("-", "_")
+    return OPENMIC_NAME_ALIASES.get(normalized, normalized)
+
+
+def build_dataset(args: argparse.Namespace) -> Tuple[OpenMicDataset, List[str], int, Path, float]:
     if args.config:
         cfg = parse_project_config(load_json(args.config))
         sample_rate = args.sample_rate or cfg.data.sample_rate
@@ -68,12 +77,13 @@ def build_dataset(args: argparse.Namespace) -> tuple[OpenMicDataset, List[str], 
         split_file = args.split_file
 
     clip_num_samples = int(sample_rate * clip_duration_sec)
+    root_path = Path(root).expanduser().resolve()
     split_cfg = {
         "type": "openmic",
         "domain": "real",
         "input_kind": "waveform",
         "params": {
-            "root": root,
+            "root": str(root_path),
             "split": args.split,
             "split_file": split_file,
             "relevance_threshold": relevance_threshold,
@@ -89,12 +99,40 @@ def build_dataset(args: argparse.Namespace) -> tuple[OpenMicDataset, List[str], 
         label_names=label_names,
         relevance_threshold=relevance_threshold,
     )
-    return dataset, label_names, sample_rate
+    return dataset, label_names, sample_rate, root_path, relevance_threshold
+
+
+def load_openmic_aggregated_annotations(root: Path) -> Dict[str, List[Dict[str, object]]]:
+    labels_csv = root / "openmic-2018-aggregated-labels.csv"
+    if not labels_csv.exists():
+        raise FileNotFoundError(f"OpenMIC aggregated labels CSV not found: {labels_csv}")
+
+    sample_to_rows: Dict[str, List[Dict[str, object]]] = {}
+    with labels_csv.open("r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            sample_key = str(row["sample_key"]).zfill(6)
+            if sample_key in CORRUPTED_SAMPLE_KEYS:
+                continue
+
+            rows = sample_to_rows.setdefault(sample_key, [])
+            rows.append(
+                {
+                    "instrument": canonicalize_instrument_name(row["instrument"]),
+                    "raw_instrument": str(row["instrument"]),
+                    "relevance": float(row["relevance"]),
+                }
+            )
+
+    for rows in sample_to_rows.values():
+        rows.sort(key=lambda item: float(item["relevance"]), reverse=True)
+    return sample_to_rows
 
 
 def main() -> None:
     args = parse_args()
-    dataset, label_names, sample_rate = build_dataset(args)
+    dataset, label_names, sample_rate, root_path, relevance_threshold = build_dataset(args)
+    aggregated_annotations = load_openmic_aggregated_annotations(root_path)
 
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -120,6 +158,18 @@ def main() -> None:
             for class_idx, is_active in enumerate(target.tolist())
             if is_active > 0
         ]
+        all_aggregated_labels = []
+        for annotation in aggregated_annotations.get(item["sample_key"], []):
+            instrument = str(annotation["instrument"])
+            all_aggregated_labels.append(
+                {
+                    "instrument": instrument,
+                    "raw_instrument": str(annotation["raw_instrument"]),
+                    "relevance": float(annotation["relevance"]),
+                    "positive_at_threshold": float(annotation["relevance"]) >= relevance_threshold,
+                    "in_target_subset": instrument in set(label_names),
+                }
+            )
 
         stem = f"{export_idx:02d}_{item['sample_key']}"
         wav_path = output_dir / f"{stem}.wav"
@@ -132,6 +182,11 @@ def main() -> None:
                 "source_audio_path": item["audio_path"],
                 "exported_wav_path": str(wav_path),
                 "positive_labels": positive_labels,
+                "all_aggregated_labels": all_aggregated_labels,
+                "all_aggregated_labels_summary": "; ".join(
+                    f"{entry['instrument']}:{entry['relevance']:.3f}"
+                    for entry in all_aggregated_labels
+                ),
             }
         )
         print(f"[{export_idx}/{len(indices)}] wrote {wav_path.name} labels={positive_labels}")
@@ -143,12 +198,20 @@ def main() -> None:
     with metadata_csv.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["export_index", "sample_key", "source_audio_path", "exported_wav_path", "positive_labels"],
+            fieldnames=[
+                "export_index",
+                "sample_key",
+                "source_audio_path",
+                "exported_wav_path",
+                "positive_labels",
+                "all_aggregated_labels_summary",
+            ],
         )
         writer.writeheader()
         for row in rows:
             csv_row = dict(row)
             csv_row["positive_labels"] = ",".join(row["positive_labels"])
+            csv_row.pop("all_aggregated_labels", None)
             writer.writerow(csv_row)
 
     print(f"Wrote {len(rows)} examples to {output_dir}")

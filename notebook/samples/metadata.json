@@ -6,7 +6,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/01_068893_7680.wav",
     "positive_labels": [
       "synthesizer"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "synthesizer",
+        "raw_instrument": "synthesizer",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "synthesizer:1.000"
   },
   {
     "export_index": 2,
@@ -15,7 +25,45 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/02_056571_1255680.wav",
     "positive_labels": [
       "violin"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "violin",
+        "raw_instrument": "violin",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "cello",
+        "raw_instrument": "cello",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": false
+      },
+      {
+        "instrument": "guitar",
+        "raw_instrument": "guitar",
+        "relevance": 0.15055000000000002,
+        "positive_at_threshold": false,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "cymbals",
+        "raw_instrument": "cymbals",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      },
+      {
+        "instrument": "mandolin",
+        "raw_instrument": "mandolin",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      }
+    ],
+    "all_aggregated_labels_summary": "violin:1.000; cello:1.000; guitar:0.151; cymbals:0.000; mandolin:0.000"
   },
   {
     "export_index": 3,
@@ -24,7 +72,38 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/03_019706_0.wav",
     "positive_labels": [
       "guitar"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "guitar",
+        "raw_instrument": "guitar",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "bass",
+        "raw_instrument": "bass",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "trombone",
+        "raw_instrument": "trombone",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      },
+      {
+        "instrument": "flute",
+        "raw_instrument": "flute",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      }
+    ],
+    "all_aggregated_labels_summary": "guitar:1.000; bass:0.000; trombone:0.000; flute:0.000"
   },
   {
     "export_index": 4,
@@ -33,7 +112,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/04_071317_84480.wav",
     "positive_labels": [
       "guitar"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "guitar",
+        "raw_instrument": "guitar",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "guitar:1.000"
   },
   {
     "export_index": 5,
@@ -42,7 +131,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/05_070934_142080.wav",
     "positive_labels": [
       "piano"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "piano",
+        "raw_instrument": "piano",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "piano:1.000"
   },
   {
     "export_index": 6,
@@ -51,7 +150,24 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/06_107068_145920.wav",
     "positive_labels": [
       "synthesizer"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "synthesizer",
+        "raw_instrument": "synthesizer",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "mandolin",
+        "raw_instrument": "mandolin",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      }
+    ],
+    "all_aggregated_labels_summary": "synthesizer:1.000; mandolin:0.000"
   },
   {
     "export_index": 7,
@@ -60,7 +176,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/07_085173_103680.wav",
     "positive_labels": [
       "synthesizer"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "synthesizer",
+        "raw_instrument": "synthesizer",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "synthesizer:1.000"
   },
   {
     "export_index": 8,
@@ -69,7 +195,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/08_036074_629760.wav",
     "positive_labels": [
       "synthesizer"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "synthesizer",
+        "raw_instrument": "synthesizer",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "synthesizer:1.000"
   },
   {
     "export_index": 9,
@@ -78,7 +214,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/09_048314_153600.wav",
     "positive_labels": [
       "synthesizer"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "synthesizer",
+        "raw_instrument": "synthesizer",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "synthesizer:1.000"
   },
   {
     "export_index": 10,
@@ -87,7 +233,24 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/10_032442_249600.wav",
     "positive_labels": [
       "violin"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "violin",
+        "raw_instrument": "violin",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "trumpet",
+        "raw_instrument": "trumpet",
+        "relevance": 0.8298,
+        "positive_at_threshold": true,
+        "in_target_subset": false
+      }
+    ],
+    "all_aggregated_labels_summary": "violin:1.000; trumpet:0.830"
   },
   {
     "export_index": 11,
@@ -96,7 +259,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/11_149309_184320.wav",
     "positive_labels": [
       "violin"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "violin",
+        "raw_instrument": "violin",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "violin:1.000"
   },
   {
     "export_index": 12,
@@ -105,7 +278,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/12_005623_203520.wav",
     "positive_labels": [
       "violin"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "violin",
+        "raw_instrument": "violin",
+        "relevance": 0.8392999999999999,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "violin:0.839"
   },
   {
     "export_index": 13,
@@ -114,7 +297,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/13_082261_42240.wav",
     "positive_labels": [
       "violin"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "violin",
+        "raw_instrument": "violin",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "violin:1.000"
   },
   {
     "export_index": 14,
@@ -123,7 +316,31 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/14_032523_42240.wav",
     "positive_labels": [
       "guitar"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "guitar",
+        "raw_instrument": "guitar",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "organ",
+        "raw_instrument": "organ",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      },
+      {
+        "instrument": "accordion",
+        "raw_instrument": "accordion",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      }
+    ],
+    "all_aggregated_labels_summary": "guitar:1.000; organ:0.000; accordion:0.000"
   },
   {
     "export_index": 15,
@@ -132,7 +349,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/15_085834_119040.wav",
     "positive_labels": [
       "drums"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "drums",
+        "raw_instrument": "drums",
+        "relevance": 0.8101499999999999,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "drums:0.810"
   },
   {
     "export_index": 16,
@@ -141,7 +368,31 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/16_108085_138240.wav",
     "positive_labels": [
       "violin"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "violin",
+        "raw_instrument": "violin",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "voice",
+        "raw_instrument": "voice",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      },
+      {
+        "instrument": "mallet_percussion",
+        "raw_instrument": "mallet_percussion",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      }
+    ],
+    "all_aggregated_labels_summary": "violin:1.000; voice:0.000; mallet_percussion:0.000"
   },
   {
     "export_index": 17,
@@ -150,7 +401,31 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/17_084888_0.wav",
     "positive_labels": [
       "violin"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "violin",
+        "raw_instrument": "violin",
+        "relevance": 0.8269,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      },
+      {
+        "instrument": "accordion",
+        "raw_instrument": "accordion",
+        "relevance": 0.1613,
+        "positive_at_threshold": false,
+        "in_target_subset": false
+      },
+      {
+        "instrument": "drums",
+        "raw_instrument": "drums",
+        "relevance": 0.0,
+        "positive_at_threshold": false,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "violin:0.827; accordion:0.161; drums:0.000"
   },
   {
     "export_index": 18,
@@ -159,7 +434,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/18_154196_230400.wav",
     "positive_labels": [
       "drums"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "drums",
+        "raw_instrument": "drums",
+        "relevance": 0.82855,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "drums:0.829"
   },
   {
     "export_index": 19,
@@ -168,7 +453,17 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/19_057543_42240.wav",
     "positive_labels": [
       "synthesizer"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "synthesizer",
+        "raw_instrument": "synthesizer",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "synthesizer:1.000"
   },
   {
     "export_index": 20,
@@ -177,6 +472,16 @@
     "exported_wav_path": "/home/mg8253/workspace/mir/mir-final-project-instrument-classification/notebook/samples/20_118020_303360.wav",
     "positive_labels": [
       "drums"
-    ]
+    ],
+    "all_aggregated_labels": [
+      {
+        "instrument": "drums",
+        "raw_instrument": "drums",
+        "relevance": 1.0,
+        "positive_at_threshold": true,
+        "in_target_subset": true
+      }
+    ],
+    "all_aggregated_labels_summary": "drums:1.000"
   }
 ]
