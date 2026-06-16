@@ -35,6 +35,13 @@ OPENMIC_CLASS_TO_INDEX = {
 }
 
 # This is how we group the slakh program numbers into the OpenMIC label names.
+#
+# KNOWN LIMITATION (20-class experiments): two OpenMIC classes, "mandolin" and
+# "ukulele", have no Slakh General-MIDI source here, so synthetic training can never
+# produce positive examples for them. When a 20-class config lists them, the model
+# simply never learns those two classes and they score ~0 at eval. This is reported
+# as a documented limitation for now and will be resolved once we render mandolin/
+# ukulele stems into Slakh via VST instruments (planned data augmentation step).
 SLAKH_MIDI_TO_OPENMIC_CLASS = {
     # Piano-like
     0: "piano", 1: "piano", 2: "piano", 3: "piano",
