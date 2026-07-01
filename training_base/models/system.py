@@ -56,7 +56,15 @@ class DomainTransferSystem(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         logits, loss = self._shared_step(batch)
-        update_metric_state(self.val_state, self.task_type, logits, batch["targets"], loss, self.threshold)
+        update_metric_state(
+            self.val_state,
+            self.task_type,
+            logits,
+            batch["targets"],
+            loss,
+            self.threshold,
+            target_mask=batch.get("target_masks"),
+        )
         self._collect_validation_demos(batch, logits)
 
     def on_validation_epoch_end(self) -> None:
@@ -68,7 +76,15 @@ class DomainTransferSystem(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         logits, loss = self._shared_step(batch)
-        update_metric_state(self.test_state, self.task_type, logits, batch["targets"], loss, self.threshold)
+        update_metric_state(
+            self.test_state,
+            self.task_type,
+            logits,
+            batch["targets"],
+            loss,
+            self.threshold,
+            target_mask=batch.get("target_masks"),
+        )
 
     def on_test_epoch_end(self) -> None:
         self._print_test_report(self.test_state)
@@ -89,6 +105,8 @@ class DomainTransferSystem(pl.LightningModule):
         #Shared forward + loss path. Good place to customize task logic.
         self._assert_finite(batch["inputs"], "batch inputs")
         self._assert_finite(batch["targets"], "batch targets")
+        if "target_masks" in batch:
+            self._assert_finite(batch["target_masks"], "batch target masks")
         logits = self(batch["inputs"], batch.get("lengths"))
         self._assert_finite(logits, "model logits")
         if self.task_type == "multiclass":
@@ -98,7 +116,12 @@ class DomainTransferSystem(pl.LightningModule):
             return logits, loss
 
         targets = batch["targets"].float()
-        loss = F.binary_cross_entropy_with_logits(logits, targets)
+        if "target_masks" in batch:
+            target_masks = batch["target_masks"].float()
+            element_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+            loss = (element_loss * target_masks).sum() / target_masks.sum().clamp_min(1.0)
+        else:
+            loss = F.binary_cross_entropy_with_logits(logits, targets)
         self._assert_finite(loss, "multilabel loss")
         return logits, loss
 
@@ -253,6 +276,9 @@ class DomainTransferSystem(pl.LightningModule):
 
         probabilities = self._compute_probabilities(logits).detach().cpu()
         targets = batch["targets"].detach().cpu()
+        target_masks = batch.get("target_masks")
+        if target_masks is not None:
+            target_masks = target_masks.detach().cpu()
         inputs = batch["inputs"].detach().cpu()
 
         for local_idx in range(batch_size):
@@ -261,7 +287,10 @@ class DomainTransferSystem(pl.LightningModule):
                 continue
 
             pred_labels = self._decode_prediction(probabilities[local_idx])
-            target_labels = self._decode_target(targets[local_idx])
+            target_mask = target_masks[local_idx] if target_masks is not None else None
+            target_labels = self._decode_target(targets[local_idx], target_mask)
+            known_negative_labels = self._decode_known_negatives(targets[local_idx], target_mask)
+            unqueried_pred_labels = self._decode_unqueried_predictions(probabilities[local_idx], target_mask)
             top_scores = self._format_top_scores(probabilities[local_idx], top_k=5)
 
             self._val_demo_rows.append(
@@ -275,6 +304,8 @@ class DomainTransferSystem(pl.LightningModule):
                     ),
                     "prediction": ", ".join(pred_labels) if pred_labels else "(none)",
                     "ground_truth": ", ".join(target_labels) if target_labels else "(none)",
+                    "known_negative": ", ".join(known_negative_labels) if known_negative_labels else "(none)",
+                    "unqueried_prediction": ", ".join(unqueried_pred_labels) if unqueried_pred_labels else "(none)",
                     "top_scores": top_scores,
                 }
             )
@@ -293,12 +324,29 @@ class DomainTransferSystem(pl.LightningModule):
         predicted_indices = (probabilities >= self.threshold).nonzero(as_tuple=False).flatten().tolist()
         return [label_names[idx] for idx in predicted_indices]
 
-    def _decode_target(self, targets: torch.Tensor) -> List[str]:
+    def _decode_target(self, targets: torch.Tensor, target_mask: Optional[torch.Tensor] = None) -> List[str]:
         label_names = self.cfg.data.label_names
         if self.task_type == "multiclass":
             return [label_names[int(targets.item())]]
 
-        target_indices = (targets >= 0.5).nonzero(as_tuple=False).flatten().tolist()
+        known = torch.ones_like(targets, dtype=torch.bool)
+        if target_mask is not None:
+            known = target_mask >= 0.5
+        target_indices = ((targets >= 0.5) & known).nonzero(as_tuple=False).flatten().tolist()
+        return [label_names[idx] for idx in target_indices]
+
+    def _decode_known_negatives(self, targets: torch.Tensor, target_mask: Optional[torch.Tensor]) -> List[str]:
+        if self.task_type == "multiclass" or target_mask is None:
+            return []
+        label_names = self.cfg.data.label_names
+        target_indices = ((targets < 0.5) & (target_mask >= 0.5)).nonzero(as_tuple=False).flatten().tolist()
+        return [label_names[idx] for idx in target_indices]
+
+    def _decode_unqueried_predictions(self, probabilities: torch.Tensor, target_mask: Optional[torch.Tensor]) -> List[str]:
+        if self.task_type == "multiclass" or target_mask is None:
+            return []
+        label_names = self.cfg.data.label_names
+        target_indices = ((probabilities >= self.threshold) & (target_mask < 0.5)).nonzero(as_tuple=False).flatten().tolist()
         return [label_names[idx] for idx in target_indices]
 
     def _format_top_scores(self, probabilities: torch.Tensor, top_k: int) -> str:
@@ -315,7 +363,18 @@ class DomainTransferSystem(pl.LightningModule):
         if experiment is None:
             return
 
-        table = wandb.Table(columns=["epoch", "dataset_index", "audio", "prediction", "ground_truth", "top_scores"])
+        table = wandb.Table(
+            columns=[
+                "epoch",
+                "dataset_index",
+                "audio",
+                "prediction",
+                "ground_truth",
+                "known_negative",
+                "unqueried_prediction",
+                "top_scores",
+            ]
+        )
         for row in self._val_demo_rows:
             table.add_data(
                 row["epoch"],
@@ -323,6 +382,8 @@ class DomainTransferSystem(pl.LightningModule):
                 row["audio"],
                 row["prediction"],
                 row["ground_truth"],
+                row["known_negative"],
+                row["unqueried_prediction"],
                 row["top_scores"],
             )
         experiment.log({"val/demos": table}, step=self.global_step)

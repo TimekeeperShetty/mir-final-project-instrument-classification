@@ -153,10 +153,21 @@ def main() -> None:
         )
 
         target = item["target"]
+        target_mask = item["target_mask"]
         positive_labels = [
             label_names[class_idx]
             for class_idx, is_active in enumerate(target.tolist())
-            if is_active > 0
+            if is_active > 0 and target_mask[class_idx].item() > 0
+        ]
+        known_negative_labels = [
+            label_names[class_idx]
+            for class_idx, is_known in enumerate(target_mask.tolist())
+            if is_known > 0 and target[class_idx].item() <= 0
+        ]
+        unknown_labels = [
+            label_names[class_idx]
+            for class_idx, is_known in enumerate(target_mask.tolist())
+            if is_known <= 0
         ]
         all_aggregated_labels = []
         for annotation in aggregated_annotations.get(item["sample_key"], []):
@@ -182,6 +193,8 @@ def main() -> None:
                 "source_audio_path": item["audio_path"],
                 "exported_wav_path": str(wav_path),
                 "positive_labels": positive_labels,
+                "known_negative_labels": known_negative_labels,
+                "unknown_labels": unknown_labels,
                 "all_aggregated_labels": all_aggregated_labels,
                 "all_aggregated_labels_summary": "; ".join(
                     f"{entry['instrument']}:{entry['relevance']:.3f}"
@@ -204,6 +217,8 @@ def main() -> None:
                 "source_audio_path",
                 "exported_wav_path",
                 "positive_labels",
+                "known_negative_labels",
+                "unknown_labels",
                 "all_aggregated_labels_summary",
             ],
         )
@@ -211,6 +226,8 @@ def main() -> None:
         for row in rows:
             csv_row = dict(row)
             csv_row["positive_labels"] = ",".join(row["positive_labels"])
+            csv_row["known_negative_labels"] = ",".join(row["known_negative_labels"])
+            csv_row["unknown_labels"] = ",".join(row["unknown_labels"])
             csv_row.pop("all_aggregated_labels", None)
             writer.writerow(csv_row)
 

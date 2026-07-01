@@ -219,17 +219,19 @@ class OpenMicDataset(Dataset):
                 continue
 
             target = torch.zeros(self.num_classes, dtype=torch.float32)
+            target_mask = torch.zeros(self.num_classes, dtype=torch.float32)
             for _, row in clip_df.iterrows():
-                if float(row["relevance"]) < self.relevance_threshold:
-                    continue
                 class_name = str(row["instrument"])
                 class_index = self.class_name_to_index.get(class_name)
                 if class_index is not None:
-                    target[class_index] = 1.0
+                    target_mask[class_index] = 1.0
+                    if float(row["relevance"]) >= self.relevance_threshold:
+                        target[class_index] = 1.0
 
-            # OpenMIC is weak-label multilabel tagging, so clips with no positive labels
-            # for the chosen target vocabulary are not useful training/eval examples here.
-            if target.sum().item() <= 0:
+            # OpenMIC only asks annotators about a sparse subset of instruments per clip.
+            # We keep clips that have at least one known label in the configured target
+            # vocabulary, even if every known response is negative.
+            if target_mask.sum().item() <= 0:
                 continue
 
             self.samples.append(
@@ -237,6 +239,7 @@ class OpenMicDataset(Dataset):
                     "sample_key": sample_key,
                     "audio_path": str(audio_path),
                     "target": target,
+                    "target_mask": target_mask,
                 }
             )
 
@@ -256,5 +259,6 @@ class OpenMicDataset(Dataset):
         return {
             "inputs": excerpt,
             "target": item["target"].clone(),
+            "target_mask": item["target_mask"].clone(),
             "domain": self.domain,
         }

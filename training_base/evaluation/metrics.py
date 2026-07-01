@@ -29,6 +29,7 @@ def update_metric_state(
     targets: torch.Tensor,
     loss: torch.Tensor,
     threshold: float,
+    target_mask: torch.Tensor | None = None,
 ) -> None:
     batch_size = targets.shape[0]
     state["loss_sum"] += loss.detach() * batch_size
@@ -44,11 +45,15 @@ def update_metric_state(
         return
 
     preds = (torch.sigmoid(logits) >= threshold).float()
-    state["tp"] += ((preds == 1) & (targets == 1)).sum(dim=0)
-    state["fp"] += ((preds == 1) & (targets == 0)).sum(dim=0)
-    state["fn"] += ((preds == 0) & (targets == 1)).sum(dim=0)
-    state["tn"] += ((preds == 0) & (targets == 0)).sum(dim=0)
-    state["exact_match"] += (preds == targets).all(dim=-1).sum()
+    known = torch.ones_like(targets, dtype=torch.bool)
+    if target_mask is not None:
+        known = target_mask >= 0.5
+
+    state["tp"] += ((preds == 1) & (targets == 1) & known).sum(dim=0)
+    state["fp"] += ((preds == 1) & (targets == 0) & known).sum(dim=0)
+    state["fn"] += ((preds == 0) & (targets == 1) & known).sum(dim=0)
+    state["tn"] += ((preds == 0) & (targets == 0) & known).sum(dim=0)
+    state["exact_match"] += (((preds == targets) | ~known).all(dim=-1) & known.any(dim=-1)).sum()
 
 
 def _safe_precision(tp: torch.Tensor, fp: torch.Tensor) -> torch.Tensor:

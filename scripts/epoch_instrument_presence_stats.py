@@ -33,6 +33,7 @@ class SplitPresenceStats:
     dropped_examples: int
     empty_target_examples: int
     avg_active_instruments_per_example: float
+    avg_known_instruments_per_example: float
     instruments: Dict[str, Dict[str, float]]
 
 
@@ -105,20 +106,29 @@ def compute_split_stats(
     label_names: List[str],
 ) -> SplitPresenceStats:
     counts = torch.zeros(len(label_names), dtype=torch.long)
+    known_counts = torch.zeros(len(label_names), dtype=torch.long)
     total_examples = 0
     total_active_labels = 0
+    total_known_labels = 0
     empty_target_examples = 0
     batches = 0
 
     progress = tqdm(loader, desc=f"{split_name} epoch", unit="batch")
     for batch in progress:
         binary_targets = targets_to_binary_matrix(batch["targets"], len(label_names))
+        if "target_masks" in batch:
+            known_targets = targets_to_binary_matrix(batch["target_masks"], len(label_names))
+        else:
+            known_targets = torch.ones_like(binary_targets, dtype=torch.bool)
         batch_counts = binary_targets.sum(dim=0).long()
+        batch_known_counts = known_targets.sum(dim=0).long()
 
         counts += batch_counts
+        known_counts += batch_known_counts
         batch_size = int(binary_targets.shape[0])
         total_examples += batch_size
         total_active_labels += int(binary_targets.sum().item())
+        total_known_labels += int(known_targets.sum().item())
         empty_target_examples += int((binary_targets.sum(dim=1) == 0).sum().item())
         batches += 1
         del batch
@@ -126,16 +136,24 @@ def compute_split_stats(
     instruments: Dict[str, Dict[str, float]] = {}
     for class_idx, class_name in enumerate(label_names):
         present = int(counts[class_idx].item())
-        absent = total_examples - present
+        known = int(known_counts[class_idx].item())
+        absent = known - present
+        unknown = total_examples - known
         fraction = (present / total_examples) if total_examples else 0.0
+        known_fraction = (known / total_examples) if total_examples else 0.0
         instruments[class_name] = {
             "present_examples": present,
             "absent_examples": absent,
+            "known_examples": known,
+            "unknown_examples": unknown,
             "presence_fraction": fraction,
             "presence_percent": fraction * 100.0,
+            "known_fraction": known_fraction,
+            "known_percent": known_fraction * 100.0,
         }
 
     avg_active = (total_active_labels / total_examples) if total_examples else 0.0
+    avg_known = (total_known_labels / total_examples) if total_examples else 0.0
     return SplitPresenceStats(
         split=split_name,
         dataset_type=dataset_type,
@@ -145,6 +163,7 @@ def compute_split_stats(
         dropped_examples=max(0, dataset_len - total_examples),
         empty_target_examples=empty_target_examples,
         avg_active_instruments_per_example=avg_active,
+        avg_known_instruments_per_example=avg_known,
         instruments=instruments,
     )
 
@@ -159,16 +178,19 @@ def print_split_stats(stats: SplitPresenceStats) -> None:
         f"batches={stats.batches} "
         f"dropped_examples={stats.dropped_examples} "
         f"empty_targets={stats.empty_target_examples} "
-        f"avg_active={stats.avg_active_instruments_per_example:.3f}"
+        f"avg_active={stats.avg_active_instruments_per_example:.3f} "
+        f"avg_known={stats.avg_known_instruments_per_example:.3f}"
     )
-    print("  instrument       present      absent     percent")
-    print("  -------------  ---------  ----------  ----------")
+    print("  instrument       present      absent     unknown     present%       known%")
+    print("  -------------  ---------  ----------  ----------  -----------  -----------")
     for class_name, values in stats.instruments.items():
         print(
             f"  {class_name:<13}  "
             f"{int(values['present_examples']):>9}  "
             f"{int(values['absent_examples']):>10}  "
-            f"{values['presence_percent']:>9.2f}%"
+            f"{int(values['unknown_examples']):>10}  "
+            f"{values['presence_percent']:>10.2f}%  "
+            f"{values['known_percent']:>10.2f}%"
         )
 
 

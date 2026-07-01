@@ -27,6 +27,7 @@ The pipeline currently supports:
   Slakh waveform training/evaluation, including the cached MIDI index and on-the-fly remix path and augmentations for multilabel training.
 - `type: "openmic"`
   OpenMIC waveform evaluation/training with configurable target label subsets and a configurable `relevance_threshold`.
+  OpenMIC annotations are sparse: labels that were not queried for a clip are masked out of loss and metrics instead of being treated as negatives.
 
 ## Typical Setup
 

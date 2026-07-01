@@ -14,6 +14,7 @@ def _basic_collate(batch: Any) -> Dict[str, Any]:
     inputs = [item["inputs"] for item in batch]
     targets = [item["target"] for item in batch]
     domains = [item["domain"] for item in batch]
+    target_masks = [item.get("target_mask") for item in batch]
     lengths = torch.tensor([int(sample.shape[-1]) for sample in inputs], dtype=torch.long)
 
     if inputs[0].ndim == 1 and any(sample.shape[-1] != inputs[0].shape[-1] for sample in inputs):
@@ -27,12 +28,15 @@ def _basic_collate(batch: Any) -> Dict[str, Any]:
     else:
         stacked_targets = torch.stack([torch.as_tensor(target, dtype=torch.long) for target in targets])
 
-    return {
+    collated = {
         "inputs": stacked_inputs,
         "targets": stacked_targets,
         "lengths": lengths,
         "domains": domains,
     }
+    if all(mask is not None for mask in target_masks):
+        collated["target_masks"] = torch.stack([torch.as_tensor(mask, dtype=torch.float32) for mask in target_masks])
+    return collated
 
 
 def collate_slakh_batch(batch: Any) -> Dict[str, Any]:

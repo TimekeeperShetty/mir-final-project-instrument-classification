@@ -77,12 +77,17 @@ def load_config_labels(config_path: Path) -> Tuple[List[str], float]:
     return labels, relevance_threshold
 
 
-def load_openmic_samples(root: Path, chosen_labels: Set[str], relevance_threshold: float) -> Dict[str, Set[str]]:
+def load_openmic_samples(
+    root: Path,
+    chosen_labels: Set[str],
+    relevance_threshold: float,
+) -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]]]:
     labels_path = root / "openmic-2018-aggregated-labels.csv"
     if not labels_path.exists():
         raise FileNotFoundError(f"OpenMIC aggregated labels CSV not found: {labels_path}")
 
-    sample_to_labels: Dict[str, Set[str]] = defaultdict(set)
+    sample_to_positive_labels: Dict[str, Set[str]] = defaultdict(set)
+    sample_to_known_labels: Dict[str, Set[str]] = defaultdict(set)
     with open(labels_path, "r", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         required_columns = {"sample_key", "instrument", "relevance"}
@@ -101,12 +106,17 @@ def load_openmic_samples(root: Path, chosen_labels: Set[str], relevance_threshol
             if class_name not in chosen_labels:
                 continue
 
+            sample_to_known_labels[sample_key].add(class_name)
             relevance = float(row["relevance"])
             if relevance >= relevance_threshold:
-                sample_to_labels[sample_key].add(class_name)
+                sample_to_positive_labels[sample_key].add(class_name)
 
-    # Drop samples that do not have any positive labels in the chosen target space.
-    return {sample_key: labels for sample_key, labels in sample_to_labels.items() if labels}
+    # Drop samples that do not have any queried labels in the chosen target space.
+    usable_keys = set(sample_to_known_labels)
+    return (
+        {sample_key: sample_to_positive_labels.get(sample_key, set()) for sample_key in usable_keys},
+        {sample_key: labels for sample_key, labels in sample_to_known_labels.items() if labels},
+    )
 
 
 def read_partition_file(path: Path) -> Set[str]:
@@ -285,23 +295,37 @@ def build_train_val_from_fixed_test(
 def summarize_split_labels(
     split_samples: Dict[str, List[str]],
     sample_to_labels: Dict[str, Set[str]],
+    sample_to_known_labels: Dict[str, Set[str]],
     chosen_labels: List[str],
 ) -> Dict[str, Dict[str, object]]:
     summary: Dict[str, Dict[str, object]] = {}
     for split_name, sample_keys in split_samples.items():
         label_counts = Counter()
+        known_label_counts = Counter()
         labels_per_sample: List[int] = []
+        known_labels_per_sample: List[int] = []
         for sample_key in sample_keys:
             labels = sample_to_labels[sample_key]
+            known_labels = sample_to_known_labels[sample_key]
             label_counts.update(labels)
+            known_label_counts.update(known_labels)
             labels_per_sample.append(len(labels))
+            known_labels_per_sample.append(len(known_labels))
 
         summary[split_name] = {
             "num_samples": len(sample_keys),
             "avg_labels_per_sample": (sum(labels_per_sample) / len(labels_per_sample)) if labels_per_sample else 0.0,
+            "avg_known_labels_per_sample": (
+                sum(known_labels_per_sample) / len(known_labels_per_sample)
+            ) if known_labels_per_sample else 0.0,
             "label_counts": {label: int(label_counts.get(label, 0)) for label in chosen_labels},
+            "known_label_counts": {label: int(known_label_counts.get(label, 0)) for label in chosen_labels},
             "label_presence_ratio": {
                 label: (float(label_counts.get(label, 0)) / max(len(sample_keys), 1))
+                for label in chosen_labels
+            },
+            "known_label_presence_ratio": {
+                label: (float(known_label_counts.get(label, 0)) / max(len(sample_keys), 1))
                 for label in chosen_labels
             },
         }
@@ -324,9 +348,9 @@ def main() -> None:
         raise ValueError("You must provide labels either through --labels or through --labels-json")
 
     relevance_threshold = args.relevance_threshold if args.relevance_threshold is not None else config_threshold
-    sample_to_labels = load_openmic_samples(root, set(chosen_labels), relevance_threshold)
-    if not sample_to_labels:
-        raise ValueError("No OpenMIC samples remained after applying the chosen labels and relevance threshold")
+    sample_to_labels, sample_to_known_labels = load_openmic_samples(root, set(chosen_labels), relevance_threshold)
+    if not sample_to_known_labels:
+        raise ValueError("No OpenMIC samples remained after applying the chosen labels")
 
     official_partitions = {} if args.ignore_official_partitions else load_official_openmic_partitions(root)
     if official_partitions:
@@ -352,6 +376,7 @@ def main() -> None:
     split_stats = summarize_split_labels(
         split_samples=split_samples,
         sample_to_labels=sample_to_labels,
+        sample_to_known_labels=sample_to_known_labels,
         chosen_labels=chosen_labels,
     )
 
@@ -362,7 +387,7 @@ def main() -> None:
                 handle.write(f"{sample_key}\n")
 
     summary = {
-        "num_samples": len(sample_to_labels),
+        "num_samples": len(sample_to_known_labels),
         "labels": chosen_labels,
         "relevance_threshold": relevance_threshold,
         "seed": args.seed,
@@ -379,9 +404,13 @@ def main() -> None:
         print(f"  {split_name}: {len(sample_keys)}")
         split_info = split_stats[split_name]
         print(f"    avg_labels_per_sample: {split_info['avg_labels_per_sample']:.3f}")
-        print("    label_counts:")
+        print(f"    avg_known_labels_per_sample: {split_info['avg_known_labels_per_sample']:.3f}")
+        print("    positive_label_counts:")
         for label in chosen_labels:
             print(f"      {label}: {split_info['label_counts'][label]}")
+        print("    known_label_counts:")
+        for label in chosen_labels:
+            print(f"      {label}: {split_info['known_label_counts'][label]}")
 
 
 if __name__ == "__main__":
