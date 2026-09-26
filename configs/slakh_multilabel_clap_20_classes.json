@@ -86,12 +86,12 @@
       "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
+        "root": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux",
         "split": [
           "train",
           "ommited"
         ],
-        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
+        "index_path": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux/slakh_midi_index.pt",
         "stem_remix": true,
         "include_context_stems": true,
         "context_stem_keep_prob": 0.7,
@@ -118,9 +118,9 @@
       "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
+        "root": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux",
         "split": "vallidation",
-        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
+        "index_path": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux/slakh_midi_index.pt",
         "stem_remix": true,
         "deterministic_remix": true,
         "remix_seed": 42,
@@ -143,9 +143,9 @@
       "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
+        "root": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux",
         "split": "test",
-        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt"
+        "index_path": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux/slakh_midi_index.pt"
       },
       "loader": {
         "drop_last": false
