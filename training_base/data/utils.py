@@ -245,6 +245,9 @@ def resolve_slakh_split_dir(root: Path, split: str) -> Path:
         "validation": "validation",
         "val": "validation",
         "test": "test",
+        # Both spellings of the redux "omitted" split resolve to the real folder name.
+        "omitted": "omitted",
+        "ommited": "omitted",
     }.get(split, split)
 
     # Try a few variants because different copies of the dataset may use slightly
@@ -252,6 +255,7 @@ def resolve_slakh_split_dir(root: Path, split: str) -> Path:
     candidate_names = [
         normalized,
         "validation" if normalized == "vallidation" else "vallidation",
+        "ommited" if normalized == "omitted" else "omitted",
         normalized.capitalize(),
         normalized.upper(),
         split,

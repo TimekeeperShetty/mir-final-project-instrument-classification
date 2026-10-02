@@ -282,12 +282,35 @@ class SlakhDataset(Dataset):
         # The current cached index is global, so every item must tell us which split
         # it came from. We canonicalize names so "val", "validation", and
         # "vallidation" all match the same logical split.
-        canonical_requested = {self._canonical_split_name(split_name) for split_name in requested_splits}
+        canonical_requested = {
+            self._canonical_split_name(split_name): split_name for split_name in requested_splits
+        }
         filtered = []
+        matched_canonical = set()
+        available_splits = set()
         for item in samples:
-            item_split = item["split"]
-            if self._canonical_split_name(str(item_split)) in canonical_requested:
+            item_split = str(item["split"])
+            available_splits.add(item_split)
+            canonical_item = self._canonical_split_name(item_split)
+            if canonical_item in canonical_requested:
                 filtered.append(item)
+                matched_canonical.add(canonical_item)
+
+        # A requested split that matches nothing used to pass unnoticed as long as some
+        # other requested split did match, which silently shrank the training set: the
+        # configs asked for ["train", "ommited"] while the index spells it "omitted", so
+        # 390 tracks were dropped from every run without a word. Fail loudly instead.
+        unmatched = [
+            requested
+            for canonical, requested in canonical_requested.items()
+            if canonical not in matched_canonical
+        ]
+        if unmatched:
+            raise ValueError(
+                f"Requested split(s) {unmatched!r} matched 0 tracks. "
+                f"The index contains {sorted(available_splits)!r}. "
+                "Fix the split name in the config, or add it to SlakhDataset._canonical_split_name."
+            )
         return filtered
 
     @staticmethod
@@ -298,6 +321,11 @@ class SlakhDataset(Dataset):
             "val": "validation",
             "vallidation": "validation",
             "test": "test",
+            # Slakh2100-redux names this split "omitted"; every config in this repo has
+            # historically misspelled it "ommited". Accept both so the configs mean what
+            # they say, and so correcting a config later is not a silent behaviour change.
+            "omitted": "omitted",
+            "ommited": "omitted",
         }.get(split.lower(), split.lower())
 
     def _build_index(self, split_dir: Path) -> None:
