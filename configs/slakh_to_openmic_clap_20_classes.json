@@ -88,12 +88,12 @@
       "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux",
+        "root": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux",
         "split": [
           "train",
           "ommited"
         ],
-        "index_path": "/scratch/jz7744/slakh_shared/data/slakh2100_flac_redux/slakh_midi_index.pt",
+        "index_path": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux/slakh_midi_index.pt",
         "stem_remix": true,
         "include_context_stems": true,
         "context_stem_keep_prob": 0.7,
@@ -121,7 +121,7 @@
       "input_kind": "waveform",
       "params": {
         "root": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018",
-        "split_file": "/scratch/mg8253/partitions_custom_20class/val.txt",
+        "split_file": "/scratch/mg8253/mir_instrument_classification/val.txt",
         "relevance_threshold": 0.5
       },
       "loader": {
@@ -134,7 +134,7 @@
       "input_kind": "waveform",
       "params": {
         "root": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018",
-        "split_file": "/scratch/mg8253/partitions_custom_20class/test.txt",
+        "split_file": "/scratch/mg8253/mir_instrument_classification/test.txt",
         "relevance_threshold": 0.5
       },
       "loader": {
