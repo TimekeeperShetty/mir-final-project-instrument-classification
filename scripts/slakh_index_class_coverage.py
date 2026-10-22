@@ -29,7 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from training_base.data.utils import (  # noqa: E402
     OPENMIC_CLASS_TO_INDEX,
-    program_to_openmic_class_name,
+    stem_to_openmic_class_name,
     union_intervals,
 )
 
@@ -91,10 +91,7 @@ def summarize(index_payload: Dict[str, Any], splits: Optional[List[str]]) -> Dic
         classes_in_track = set()
         for stem in track.get("stems", []):
             bucket["stems"] += 1
-            class_name = program_to_openmic_class_name(
-                int(stem.get("program_num", -1)),
-                is_drum=bool(stem.get("is_drum", False)),
-            )
+            class_name = stem_to_openmic_class_name(stem)
             if class_name is None:
                 bucket["unmapped_stems"] += 1
                 continue

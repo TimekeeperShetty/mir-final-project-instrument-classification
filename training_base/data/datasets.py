@@ -206,9 +206,32 @@ class SlakhDataset(Dataset):
         if index_paths:
             # Fast path: load the prebuilt MIDI index and then keep only the tracks that
             # belong to the requested split.
+            matched_splits: Set[str] = set()
+            available_splits: Set[str] = set()
             for index_path in index_paths:
                 # Each index file can contribute samples to this split.
-                self.samples.extend(self._load_index(index_path, requested_splits=requested_splits))
+                self.samples.extend(
+                    self._load_index(
+                        index_path,
+                        requested_splits=requested_splits,
+                        matched_splits=matched_splits,
+                        available_splits=available_splits,
+                    )
+                )
+            # The "split matched nothing" check runs over all index files together. Not every
+            # dataset has every split (SynthSOD has no "omitted"), so a split only has to be
+            # found in one of the indexes.
+            unmatched = [
+                split_name
+                for split_name in requested_splits
+                if self._canonical_split_name(split_name) not in matched_splits
+            ]
+            if unmatched:
+                raise ValueError(
+                    f"Requested split(s) {unmatched!r} matched 0 tracks. "
+                    f"The indexes contain {sorted(available_splits)!r}. "
+                    "Fix the split name in the config, or add it to SlakhDataset._canonical_split_name."
+                )
         else:
             for root in roots:
                 for split_name in requested_splits:
@@ -228,7 +251,13 @@ class SlakhDataset(Dataset):
         # Keep split-name normalization in one shared helper
         return resolve_slakh_split_dir(root, split)
 
-    def _load_index(self, index_path: Path, requested_splits: List[str]) -> List[Dict[str, Any]]:
+    def _load_index(
+        self,
+        index_path: Path,
+        requested_splits: List[str],
+        matched_splits: Set[str],
+        available_splits: Set[str],
+    ) -> List[Dict[str, Any]]:
         # Cached training is only possible if the index file actually exists.
         if not index_path.exists():
             raise FileNotFoundError(f"Slakh index file not found: {index_path}")
@@ -237,7 +266,12 @@ class SlakhDataset(Dataset):
         payload = torch.load(index_path, map_location="cpu")
         samples = normalize_slakh_index_payload(payload)
         #keep only the entries belonging to the requested split or split list
-        filtered = self._filter_index_samples_for_split(samples, requested_splits)
+        filtered = self._filter_index_samples_for_split(
+            samples,
+            requested_splits,
+            matched_splits=matched_splits,
+            available_splits=available_splits,
+        )
         if not filtered:
             raise ValueError(
                 f"No cached Slakh tracks matched splits={requested_splits!r} in index {index_path}"
@@ -278,39 +312,28 @@ class SlakhDataset(Dataset):
         self,
         samples: List[Dict[str, Any]],
         requested_splits: List[str],
+        *,
+        matched_splits: Set[str],
+        available_splits: Set[str],
     ) -> List[Dict[str, Any]]:
         # The current cached index is global, so every item must tell us which split
         # it came from. We canonicalize names so "val", "validation", and
         # "vallidation" all match the same logical split.
-        canonical_requested = {
-            self._canonical_split_name(split_name): split_name for split_name in requested_splits
-        }
+        #
+        # A requested split that matches nothing used to pass unnoticed as long as some
+        # other requested split did match, which silently shrank the training set: the
+        # configs asked for ["train", "ommited"] while the index spells it "omitted", so
+        # 390 tracks were dropped from every run without a word. We record which splits
+        # matched so __init__ can fail loudly once every index file has been read.
+        canonical_requested = {self._canonical_split_name(split_name) for split_name in requested_splits}
         filtered = []
-        matched_canonical = set()
-        available_splits = set()
         for item in samples:
             item_split = str(item["split"])
             available_splits.add(item_split)
             canonical_item = self._canonical_split_name(item_split)
             if canonical_item in canonical_requested:
                 filtered.append(item)
-                matched_canonical.add(canonical_item)
-
-        # A requested split that matches nothing used to pass unnoticed as long as some
-        # other requested split did match, which silently shrank the training set: the
-        # configs asked for ["train", "ommited"] while the index spells it "omitted", so
-        # 390 tracks were dropped from every run without a word. Fail loudly instead.
-        unmatched = [
-            requested
-            for canonical, requested in canonical_requested.items()
-            if canonical not in matched_canonical
-        ]
-        if unmatched:
-            raise ValueError(
-                f"Requested split(s) {unmatched!r} matched 0 tracks. "
-                f"The index contains {sorted(available_splits)!r}. "
-                "Fix the split name in the config, or add it to SlakhDataset._canonical_split_name."
-            )
+                matched_splits.add(canonical_item)
         return filtered
 
     @staticmethod

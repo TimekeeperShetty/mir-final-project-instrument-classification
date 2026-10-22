@@ -135,6 +135,41 @@ SLAKH_MIDI_TO_OPENMIC_CLASS = {
 }
 
 
+# SynthSOD stems are named by instrument instead of by GM program, so they get their own
+# table. The keys are the stem file names without ".flac".
+#
+# Instruments with no OpenMIC class are mapped to their own lowercase name instead of None.
+# Those names are never in the configured label space, so the dataset treats these stems
+# as context stems: they can be mixed into the training audio, but never become labels.
+# Mapping them to None would drop them entirely, which throws away realistic background.
+#
+# PENDING TEAM DECISION: viola is context-only and contrabass ("Bass") maps to bass, as
+# recommended in the SynthSOD briefing. Change these two lines if the team decides otherwise;
+# no index rebuild is needed because the mapping is applied at load time.
+SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS = {
+    "Violin_1": "violin",
+    "Violin_2": "violin",
+    "Viola": "viola",
+    "Cello": "cello",
+    "Bass": "bass",
+    "Flute": "flute",
+    "Clarinet": "clarinet",
+    "Trumpet": "trumpet",
+    "Trombone": "trombone",
+
+    # Context only: no matching OpenMIC class.
+    "Piccolo": "piccolo",
+    "Oboe": "oboe",
+    "coranglais": "cor_anglais",
+    "Bassoon": "bassoon",
+    "Horn": "horn",
+    "Tuba": "tuba",
+    "Harp": "harp",
+    "Timpani": "timpani",
+    "untunedpercussion": "untuned_percussion",
+}
+
+
 INDEX_TO_OPENMIC_CLASS = {index: name for name, index in OPENMIC_CLASS_TO_INDEX.items()}
 
 
@@ -156,6 +191,18 @@ def program_to_openmic_class_name(program: int, is_drum: bool) -> Optional[str]:
     if is_drum:
         return "drums"
     return SLAKH_MIDI_TO_OPENMIC_CLASS.get(program)
+
+
+def stem_to_openmic_class_name(stem: Dict[str, Any]) -> Optional[str]:
+    # Cached stems from different datasets carry different raw facts. SynthSOD stems store
+    # the instrument name under "instrument"; Slakh stems store a GM program and is_drum.
+    instrument = stem.get("instrument")
+    if instrument is not None:
+        return SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS.get(str(instrument))
+    return program_to_openmic_class_name(
+        int(stem.get("program_num", -1)),
+        is_drum=bool(stem.get("is_drum", False)),
+    )
 
 
 def program_to_openmic_class_id(program: int, is_drum: bool) -> int:
@@ -454,9 +501,7 @@ def materialize_slakh_label_view(
     class_to_intervals: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
 
     for raw_stem in raw_stems:
-        program = int(raw_stem.get("program_num", -1))
-        is_drum = bool(raw_stem.get("is_drum", False))
-        class_name = program_to_openmic_class_name(program, is_drum=is_drum)
+        class_name = stem_to_openmic_class_name(raw_stem)
         if class_name is None:
             continue
         if allowed_class_names is not None and class_name not in allowed_class_names:
@@ -511,6 +556,8 @@ def normalize_slakh_index_payload(payload: Any) -> List[Dict[str, Any]]:
                     "midi_path": Path(stem["midi_path"]) if stem.get("midi_path") else None,
                     "program_num": int(stem.get("program_num", -1)),
                     "is_drum": bool(stem.get("is_drum", False)),
+                    # Only SynthSOD stems have this; Slakh stems keep None and map by program.
+                    "instrument": stem.get("instrument"),
                     "intervals": [tuple(interval) for interval in stem.get("intervals", [])],
                 }
             )
