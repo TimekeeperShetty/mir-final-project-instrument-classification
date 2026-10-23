@@ -16,8 +16,9 @@ Two things differ from the Slakh builder:
   end so the threshold can be checked.
 
 SynthSOD also has no mix file, so the script sums the stems of each piece into a mono
-mix.flac under --mix-root. Training with stem_remix only needs that mix for its rare
-fallback path, but the index format requires one per track.
+mix.flac under --mix-root. Training with stem_remix never reads it (clips are always
+built from the stems); it is only used when stem_remix is off, and the index format
+requires one per track.
 
 Example:
     python scripts/build_synthsod_index.py \

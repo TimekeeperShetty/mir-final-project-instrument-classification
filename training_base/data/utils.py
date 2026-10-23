@@ -143,9 +143,23 @@ SLAKH_MIDI_TO_OPENMIC_CLASS = {
 # as context stems: they can be mixed into the training audio, but never become labels.
 # Mapping them to None would drop them entirely, which throws away realistic background.
 #
-# PENDING TEAM DECISION: viola is context-only and contrabass ("Bass") maps to bass, as
-# recommended in the SynthSOD briefing. Change these two lines if the team decides otherwise;
-# no index rebuild is needed because the mapping is applied at load time.
+# Violins stay labelled targets even though Slakh covers violin well: in real orchestral
+# music the cello almost always plays under violins, and the model needs to hear that.
+# The activity threshold misses some very quiet violin passages; such windows just leave
+# the violin stem out of the clip, so the cost is fewer clips, not wrong labels.
+#
+# Every other instrument without a matching target class is context, including ones whose
+# sound is close to a target class: viola (violin), timpani (drums) and horn (Slakh maps
+# French horn to trumpet). The model hears them labelled "absent", which is the correct
+# OpenMIC answer for all three.
+#
+# Untuned percussion is the one stem mapped to None, so it is left out of the audio
+# entirely. It holds real cymbals and drums, which are OpenMIC classes, but the stem does
+# not say which, so it can be neither a label nor context.
+#
+# PENDING TEAM DECISION: contrabass ("Bass") maps to bass, as recommended in the SynthSOD
+# briefing. Change that line if the team decides otherwise; no index rebuild is needed
+# because the mapping is applied at load time.
 SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS = {
     "Violin_1": "violin",
     "Violin_2": "violin",
@@ -162,11 +176,13 @@ SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS = {
     "Oboe": "oboe",
     "coranglais": "cor_anglais",
     "Bassoon": "bassoon",
-    "Horn": "horn",
     "Tuba": "tuba",
     "Harp": "harp",
+    "Horn": "horn",
     "Timpani": "timpani",
-    "untunedpercussion": "untuned_percussion",
+
+    # Dropped entirely; see above.
+    "untunedpercussion": None,
 }
 
 

@@ -808,18 +808,42 @@ class SlakhDataset(Dataset):
 
         # Final fallback if every retry landed on empty configured activity.
         # This path should be rare, but it prevents the dataset from crashing.
-        waveform = audio.load_waveform(str(item["audio_path"]), self.sample_rate)
-        excerpt = audio.trim_or_pad(waveform, self.clip_num_samples, random_crop=False)
-        target = torch.zeros(self.num_classes, dtype=torch.float32)
+        #
+        # The clip is built from the mapped stems of the first crop, not from the full mix:
+        # the full mix also holds stems the mapping drops (Slakh programs missing from
+        # SLAKH_MIDI_TO_OPENMIC_CLASS), and any target stem playing there would be audible
+        # under an all-zero label.
+        # Here every active target class is kept, so the label matches the audio.
+        crop_end_sec = self.clip_num_samples / self.sample_rate
+        active_by_class = self._collect_active_stems(item.get("stems", []), 0.0, crop_end_sec)
+        kept_classes = list(active_by_class.keys())
+        selected_target_stems: List[Dict[str, Any]] = []
+        for class_name in kept_classes:
+            selected_target_stems.extend(self._choose_stems_for_class(active_by_class[class_name], generator=generator))
+        active_context_by_class = self._collect_active_stems(item.get("context_stems", []), 0.0, crop_end_sec)
+        selected_context_stems = self._choose_context_stems(active_context_by_class, generator=generator)
+        selected_stems = list(selected_target_stems) + list(selected_context_stems)
+        excerpt = self._mix_selected_stems(selected_stems, 0)
+        target = self._build_submix_target(kept_classes)
         debug_payload = {
             "offset": 0,
             "crop_start_sec": 0.0,
-            "crop_end_sec": self.clip_num_samples / self.sample_rate,
-            "mode": "fallback_empty",
-            "kept_classes": [],
-            "selected_stems": [],
+            "crop_end_sec": crop_end_sec,
+            "mode": "fallback_first_crop",
+            "kept_classes": kept_classes,
+            "num_context_stems": len(selected_context_stems),
+            "selected_stems": [
+                {
+                    "stem_id": stem["stem_id"],
+                    "class_name": stem["class_name"],
+                    "program_num": stem["program_num"],
+                    "active_sec": round(float(stem["active_sec"]), 4),
+                    "role": "target" if stem in selected_target_stems else "context",
+                }
+                for stem in selected_stems
+            ],
         }
-        return excerpt.float(), target, debug_payload
+        return excerpt, target, debug_payload
 
     def _add_multiclass_samples(self, stems_dir: Path, stems_metadata: Dict[str, Any]) -> None:
         for stem_id, stem_info in stems_metadata.items():
