@@ -648,11 +648,11 @@ class SlakhDataset(Dataset):
         return [stems[index] for index in permutation[: self.max_stems_per_class]]
 
     def _load_stem_excerpt(self, stem: Dict[str, Any], offset: int) -> torch.Tensor:
-        # Load the stem waveform from disk.
-        waveform = audio.load_waveform(str(stem["audio_path"]), self.sample_rate)
-        # Slice out the same crop window we are using for the track-level example.
+        # Read only the crop window from disk, the same window used for the whole example.
+        # Reading the full stem first would cost gigabytes per clip on hour-long pieces.
+        waveform = audio.load_waveform_excerpt(str(stem["audio_path"]), self.sample_rate, offset, self.clip_num_samples)
         excerpt = audio.trim_or_pad(
-            waveform[offset : offset + self.clip_num_samples],
+            waveform,
             self.clip_num_samples,
             random_crop=False,
         )

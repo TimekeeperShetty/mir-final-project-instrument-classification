@@ -8,8 +8,9 @@ example Slakh plus SynthSOD). It answers:
 - how many tracks contain each class, and the keep probability the remix gives it,
 - what a sample of real training clips looks like: labels per source, how often the
   fallback clip is used, and how long one clip takes to build,
-- how long and how much memory one clip from the longest track takes, since every clip
-  reads its stem files whole.
+- whether reading only the clip window from a stem gives the same audio as decoding the
+  whole stem,
+- how long and how much memory one clip from the longest track takes.
 
 Example:
     python scripts/check_training_pool.py \
@@ -33,6 +34,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from training_base.config import load_json, parse_project_config  # noqa: E402
+from training_base.data import audio  # noqa: E402
 from training_base.data.datasets import build_dataset  # noqa: E402
 
 
@@ -116,8 +118,31 @@ def main() -> None:
         print(f"  {source}: {clips} clips, {seconds_per_source[source] / clips:.2f} s per clip")
         print("    labelled: " + ", ".join(f"{name} {count}" for name, count in labels_per_source[source].most_common()))
 
-    # Every clip reads each chosen stem file whole, so the longest track sets the worst case
-    # for both time and memory per dataloader worker.
+    # Clips read only their window from each stem (audio.load_waveform_excerpt). Check that
+    # it returns the same samples as decoding the whole stem with load_waveform and slicing,
+    # on a few short stems from each source.
+    worst_difference = 0.0
+    compared = 0
+    for source in sources:
+        short_items = sorted(
+            (item for item in samples if track_source(item) == source and item.get("stems")),
+            key=lambda item: float(item.get("duration_sec", 0.0)),
+        )[:3]
+        for item in short_items:
+            stem = item["stems"][0]
+            full = audio.load_waveform(str(stem["audio_path"]), dataset.sample_rate)
+            offset = max(0, (len(full) - dataset.clip_num_samples) // 2)
+            expected = full[offset : offset + dataset.clip_num_samples]
+            excerpt = audio.load_waveform_excerpt(
+                str(stem["audio_path"]), dataset.sample_rate, offset, dataset.clip_num_samples
+            )
+            if excerpt.shape != expected.shape:
+                raise SystemExit(f"Excerpt length differs for {stem['audio_path']}: {excerpt.shape} vs {expected.shape}")
+            worst_difference = max(worst_difference, float((excerpt - expected).abs().max()))
+            compared += 1
+    print(f"\nExcerpt loader vs full decode on {compared} stems: worst sample difference {worst_difference:.1e}")
+
+    # The longest track is the worst case for time and memory per dataloader worker.
     longest = max(samples, key=lambda item: float(item.get("duration_sec", 0.0)))
     memory_before = peak_memory_mb()
     start = time.perf_counter()
