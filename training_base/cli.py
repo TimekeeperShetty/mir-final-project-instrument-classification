@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 
 from .config import load_json, parse_project_config
@@ -21,6 +22,9 @@ def build_logger(cfg):
     save_dir = None
     if cfg.trainer.save_dir:
         save_dir = os.path.join(cfg.trainer.save_dir, cfg.experiment.name)
+        # wandb reports a missing folder as "not writable" and falls back to the system
+        # temp folder, which is wiped when a cluster job ends. Create it up front.
+        os.makedirs(save_dir, exist_ok=True)
 
     return WandbLogger(
         project=cfg.logging.wandb.project,
@@ -30,6 +34,9 @@ def build_logger(cfg):
         mode=cfg.logging.wandb.mode,
         tags=cfg.logging.wandb.tags,
         log_model=cfg.logging.wandb.log_model,
+        # The system skips cfg in save_hyperparameters, so log the whole config here to
+        # keep runs comparable (data sources, splits, encoder, optimizer).
+        config=dataclasses.asdict(cfg),
     )
 
 

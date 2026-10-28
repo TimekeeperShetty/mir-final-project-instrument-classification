@@ -125,7 +125,7 @@
       "input_kind": "waveform",
       "params": {
         "root": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018",
-        "split_file": "/scratch/mg8253/mir_instrument_classification/val.txt",
+        "split_file": "splits/openmic_20_classes/val.txt",
         "relevance_threshold": 0.5
       },
       "loader": {
@@ -138,7 +138,7 @@
       "input_kind": "waveform",
       "params": {
         "root": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018",
-        "split_file": "/scratch/mg8253/mir_instrument_classification/test.txt",
+        "split_file": "splits/openmic_20_classes/test.txt",
         "relevance_threshold": 0.5
       },
       "loader": {

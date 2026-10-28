@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 from . import audio
 from .utils import OPENMIC_CLASS_TO_INDEX, get_split_cfg_params, get_split_cfg_value
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # OpenMIC mostly already uses the vocabulary we want, but in practice there are a
 # few naming variants that are worth normalizing so the dataset can still line up
@@ -179,7 +180,10 @@ class OpenMicDataset(Dataset):
         else:
             split_path = Path(split_file)
             if not split_path.is_absolute():
-                split_path = partitions_dir / split_path
+                # A relative path is looked up in the repo first (the split lists we commit
+                # under splits/), then in the OpenMIC partitions folder.
+                repo_path = REPO_ROOT / split_path
+                split_path = repo_path if repo_path.exists() else partitions_dir / split_path
             if not split_path.exists():
                 raise FileNotFoundError(f"OpenMIC split file not found: {split_path}")
 
@@ -200,7 +204,9 @@ class OpenMicDataset(Dataset):
 
         df["sample_key"] = df["sample_key"].astype(str).str.zfill(6)
         df = df[df["sample_key"].isin(split_keys)]
-        df = df[~df["sample_key"].isin(CORRUPTED_SAMPLE_KEYS)]
+        # Sample keys look like "071827_549120"; the corrupted list holds only the part
+        # before the underscore, so compare on that part.
+        df = df[~df["sample_key"].str.split("_").str[0].isin(CORRUPTED_SAMPLE_KEYS)]
 
         def canonicalize_instrument_name(name: Any) -> str:
             normalized = str(name).strip().lower().replace(" ", "_").replace("-", "_")

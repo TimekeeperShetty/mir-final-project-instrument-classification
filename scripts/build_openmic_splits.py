@@ -99,7 +99,9 @@ def load_openmic_samples(
 
         for row in reader:
             sample_key = str(row["sample_key"]).zfill(6)
-            if sample_key in CORRUPTED_SAMPLE_KEYS:
+            # Sample keys look like "071827_549120"; the corrupted list holds the part
+            # before the underscore.
+            if sample_key.split("_")[0] in CORRUPTED_SAMPLE_KEYS:
                 continue
 
             class_name = canonicalize_instrument_name(row["instrument"])
