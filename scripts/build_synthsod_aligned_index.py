@@ -3,6 +3,7 @@
 
 Official split assignments are preserved. Violin sections are one logical stem:
 their audio is summed together during loading because the score merges program 40.
+Only stem paths, audio headers and score intervals are indexed; no mixes are written.
 Use the v2 aligned-score release. The extracted files do not embed a version marker.
 """
 from __future__ import annotations
@@ -23,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.build_synthsod_index import SYNTHSOD_SPLIT_NAMES, resolve_synthsod_root, write_mono_mix
+from scripts.build_synthsod_index import SYNTHSOD_SPLIT_NAMES, resolve_synthsod_root
 from scripts.compare_synthsod_activity import PROGRAM_TO_INSTRUMENT, clipped, read_score
 from training_base.data.utils import (
     OPENMIC_CLASS_TO_INDEX,
@@ -72,7 +73,7 @@ def read_partitions(root, aligned_root):
     return original, aligned
 
 
-def index_piece(song, data_root, aligned_root, mix_root, mic):
+def index_piece(song, data_root, aligned_root, mic):
     name = song["song_name"]
     score_path = aligned_root / "SynthSOD_score_data" / f"{name}.txt"
     score, silence_rows = read_score(score_path)
@@ -150,15 +151,11 @@ def index_piece(song, data_root, aligned_root, mix_root, mic):
             cropped_intervals += end > duration
         stem["intervals"] = clipped(stem["intervals"], duration)
 
-    # This mix contains exactly the retained score-backed stems, including context.
-    # It therefore also excludes untunedpercussion when stem_remix is off.
-    mix_path = mix_root / name / "mix.flac"
-    mix_duration, sample_rate = write_mono_mix(all_paths, mix_path)
     _, class_intervals = materialize_slakh_label_view(stems)
     track_id = f"synthsod/{name}"
     track = dict(
         track_id=track_id, sample_id=track_id, split=song["split"],
-        audio_path=str(mix_path), duration_sec=float(mix_duration), sample_rate=sample_rate,
+        audio_path=None, duration_sec=float(duration), sample_rate=next(iter(sample_rates)),
         class_intervals=class_intervals, stems=stems,
         score_path=str(score_path), activity_source="aligned_score",
     )
@@ -175,8 +172,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("/scratch/axs10538/datasets/synthsod/SynthSOD"))
     parser.add_argument("--aligned-root", type=Path, default=DEFAULT_OUTPUT_ROOT / "SynthSOD_aligned_scores")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_ROOT / "synthsod_aligned_index.pt")
-    parser.add_argument("--mix-root", type=Path, default=DEFAULT_OUTPUT_ROOT / "synthsod_aligned_mixes")
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_ROOT / "synthsod_aligned_stems_index.pt")
     parser.add_argument("--mic", choices=["Tree", "Close Mic"], default="Tree")
     parser.add_argument("--workers", type=int, default=min(4, int(os.environ.get("SLURM_CPUS_PER_TASK", "4"))))
     parser.add_argument("--limit", type=int, default=0, help="Maximum pieces per split for a trial; 0 indexes all aligned pieces")
@@ -187,10 +183,9 @@ def main():
     root = resolve_synthsod_root(args.root.expanduser().resolve())
     aligned_root = args.aligned_root.expanduser().resolve()
     output = args.output.expanduser().resolve()
-    mix_root = args.mix_root.expanduser().resolve()
     report_path = output.with_suffix(".report.json")
-    if output.exists() or report_path.exists() or mix_root.exists():
-        parser.error("--output, its .report.json companion, and --mix-root must be new paths")
+    if output.exists() or report_path.exists():
+        parser.error("--output and its .report.json companion must be new paths")
     original, aligned = read_partitions(root, aligned_root)
     songs, selected_counts = [], Counter()
     for name, song in sorted(aligned.items()):
@@ -200,10 +195,9 @@ def main():
     if not songs:
         raise ValueError("Aligned metadata contains no pieces")
     output.parent.mkdir(parents=True, exist_ok=True)
-    mix_root.mkdir(parents=True, exist_ok=False)
     tracks, audit_totals, excluded = {}, Counter(), []
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(index_piece, song, root / "SynthSOD_data", aligned_root, mix_root, args.mic): song["song_name"]
+        futures = {pool.submit(index_piece, song, root / "SynthSOD_data", aligned_root, args.mic): song["song_name"]
                    for song in songs}
         for done, future in enumerate(as_completed(futures), 1):
             try:
@@ -228,14 +222,14 @@ def main():
         target_counts[track["split"]].update(targets)
         context_only[track["split"]] += not targets
     payload = dict(
-        root=str(root), source="synthsod", mic=args.mic, split_counts=dict(split_counts),
+        root=str(root), source="synthsod", mic=args.mic, split_counts=dict(split_counts), requires_stem_remix=True,
         activity=dict(method="aligned_scores", aligned_root=str(aligned_root),
                       violin_handling="sections_loaded_together", note_tail_sec=0.0),
         tracks=dict(sorted(tracks.items())),
     )
     torch.save(payload, output)
     report = dict(
-        output=str(output), mix_root=str(mix_root), mic=args.mic, trial_limit_per_split=args.limit,
+        output=str(output), audio_storage="original_stems_only", mic=args.mic, trial_limit_per_split=args.limit,
         original_split_counts=dict(Counter(song["split"] for song in original.values())),
         aligned_split_counts=dict(Counter(song["split"] for song in aligned.values())),
         indexed_split_counts=dict(split_counts), target_class_track_counts=dict(target_counts),
@@ -247,7 +241,8 @@ def main():
                "Inconsistent scored instruments, missing audio, and score overruns exclude the whole piece; --strict makes these fatal.",
                "Instrument-set mismatches affecting only dropped instruments do not exclude a piece.",
                "Violin sections are a single remix unit with union score activity.",
-               "Untuned percussion is excluded from both remix stems and generated full mixes.",
+               "No full mixes are generated; this index requires the on-the-fly stem remix loader.",
+               "Untuned percussion is excluded from the remix stems.",
                "Use aligned-score release v2; extracted files do not embed a version marker."],
     )
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

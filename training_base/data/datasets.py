@@ -278,6 +278,14 @@ class SlakhDataset(Dataset):
             raise ValueError(
                 f"No cached Slakh tracks matched splits={requested_splits!r} in index {index_path}"
             )
+        if any(item.get("requires_stem_remix") for item in filtered) and not (
+            self.task_type == "multilabel" and self.stem_remix_enabled
+            and (self.train_mode or self.deterministic_remix)
+        ):
+            raise ValueError(
+                f"Stem-only index {index_path} requires multilabel stem_remix=true. "
+                "For validation/test previews, also set deterministic_remix=true."
+            )
         # The cache now stores raw stem facts. We rebuild the current mapped view here so
         # that changing SLAKH_MIDI_TO_OPENMIC_CLASS does not force a cache rebuild.
         remapped_samples: List[Dict[str, Any]] = []
@@ -1106,7 +1114,7 @@ def export_random_slakh_previews(
     summary_examples = []
     for export_idx, sample_idx in enumerate(chosen_indices):
         item = dataset.samples[sample_idx]
-        track_dir = Path(item["audio_path"]).parent
+        track_name = Path(str(item.get("track_id") or item["sample_id"])).name
         excerpt, target, debug_payload = dataset._build_multilabel_excerpt_and_target(item)
         crop_start_sec = float(debug_payload["crop_start_sec"])
         crop_end_sec = float(debug_payload["crop_end_sec"])
@@ -1117,7 +1125,7 @@ def export_random_slakh_previews(
             if value >= 0.5
         ]
 
-        example_dir = output_dir / f"example_{export_idx:02d}_{track_dir.name}"
+        example_dir = output_dir / f"example_{export_idx:02d}_{track_name}"
         mix_path = _save_audio_preview(excerpt, dataset.sample_rate, example_dir / "mix.wav")
 
         stem_entries = []
@@ -1148,7 +1156,7 @@ def export_random_slakh_previews(
             "dataset_index": sample_idx,
             "sample_id": item.get("sample_id"),
             "track_id": item.get("track_id"),
-            "source_mix_path": str(item["audio_path"]),
+            "source_mix_path": str(item["audio_path"]) if item.get("audio_path") else None,
             "saved_mix_path": str(mix_path),
             "mode": debug_payload.get("mode"),
             "crop_start_sec": round(crop_start_sec, 4),

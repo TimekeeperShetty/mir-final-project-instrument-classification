@@ -45,12 +45,11 @@ On the HPC, with the v2 aligned-score release extracted:
 python scripts/build_synthsod_aligned_index.py \
   --root /scratch/axs10538/datasets/synthsod/SynthSOD \
   --aligned-root /scratch/mg8253/mir_instrument_classification/SynthSOD_aligned_scores \
-  --output /scratch/mg8253/mir_instrument_classification/synthsod_aligned_index.pt \
-  --mix-root /scratch/mg8253/mir_instrument_classification/synthsod_aligned_mixes \
+  --output /scratch/mg8253/mir_instrument_classification/synthsod_aligned_stems_index.pt \
   --workers 4
 ```
 
-The output index, its `.report.json` companion and mix directory must be new paths.
+The output index and its `.report.json` companion must be new paths.
 The report records split counts, excluded unannotated pieces, and target coverage.
 Missing score files cause an error. Pieces with missing audio, score overruns, or
 instrument-set disagreements between score and aligned metadata are excluded with
@@ -61,16 +60,20 @@ percussion do not exclude a piece. In the supplied local annotations,
 score, so it is excluded rather than guessing a remapping. The expected training
 count is therefore 350 if no other audio problems are found; holdouts remain 42/91.
 `--limit N` builds a trial with up to N pieces per split; use different
-output/mix paths for trials. Full mixes are generated once, which requires audio
-decoding and disk space even though subsequent remix training reads the source
-stem excerpts directly.
+output paths for trials. The builder reads score files and audio headers only;
+it does not decode full stems, generate mixes, or require a `--mix-root`.
+The index references the original stem files and requires `stem_remix: true`.
+At each crop, the dataloader selects active classes, drops instruments according
+to the configured remix policy, reads the selected stem excerpts, and sums them
+on the fly. Labels are built from the retained target instruments. For synthetic
+validation/test with this index, also set `deterministic_remix: true`.
 
 Intervals are unions of aligned note start/end times, with silence rows ignored
 and no RMS thresholds or added release tails. Since program 40 merges violin
 sections, both section files are read at the same offset and summed as one logical
 violin stem before augmentation. Sections cannot be independently dropped. Other
 instruments retain their individual activity and normal remix behavior. Ambiguous
-untuned percussion is omitted from the stems and the generated full mixes.
+untuned percussion is omitted from the stems.
 
 Use `configs/slakh_synthsod_aligned_rendered_to_openmic_clap_20_classes.json` to
 combine the Slakh index with the new aligned-only SynthSOD index and rendered

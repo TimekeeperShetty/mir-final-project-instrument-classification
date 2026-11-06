@@ -98,7 +98,7 @@
         ],
         "index_paths": [
           "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux/slakh_midi_index.pt",
-          "/scratch/mg8253/mir_instrument_classification/synthsod_aligned_index.pt"
+          "/scratch/mg8253/mir_instrument_classification/synthsod_aligned_stems_index.pt"
         ],
         "stem_remix": true,
         "include_context_stems": true,

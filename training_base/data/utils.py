@@ -563,6 +563,10 @@ def normalize_slakh_index_payload(payload: Any) -> List[Dict[str, Any]]:
             raise ValueError("Each cached Slakh track must store its originating split")
         if "duration_sec" not in item:
             raise ValueError("Each cached Slakh track must store duration_sec")
+        audio_path = Path(item["audio_path"]) if item.get("audio_path") else None
+        sample_id = item.get("sample_id") or item.get("track_id") or (str(audio_path) if audio_path else None)
+        if sample_id is None:
+            raise ValueError("Each cached track must have a sample_id, track_id, or mix audio_path")
 
         raw_stems = []
         for stem in item.get("stems", []):
@@ -587,9 +591,10 @@ def normalize_slakh_index_payload(payload: Any) -> List[Dict[str, Any]]:
         normalized_samples.append(
             {
                 "track_id": item.get("track_id"),
-                "sample_id": item.get("sample_id", str(Path(item["audio_path"]))),
+                "sample_id": sample_id,
                 "split": str(item["split"]),
-                "audio_path": Path(item["audio_path"]),
+                "audio_path": audio_path,
+                "requires_stem_remix": bool(payload.get("requires_stem_remix") or audio_path is None),
                 "duration_sec": float(item["duration_sec"]),
                 "raw_stems": raw_stems,
                 "class_intervals": class_intervals,
