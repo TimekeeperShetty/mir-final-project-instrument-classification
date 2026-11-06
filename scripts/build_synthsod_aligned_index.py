@@ -35,6 +35,10 @@ from training_base.data.utils import (
 DEFAULT_OUTPUT_ROOT = Path("/scratch/mg8253/mir_instrument_classification")
 
 
+class InvalidAlignedPiece(ValueError):
+    """Annotations cannot safely describe the audio for this piece."""
+
+
 def read_songs(root, filename):
     payload = json.loads((root / filename).read_text(encoding="utf-8"))
     songs = {}
@@ -72,6 +76,20 @@ def index_piece(song, data_root, aligned_root, mix_root, mic):
     name = song["song_name"]
     score_path = aligned_root / "SynthSOD_score_data" / f"{name}.txt"
     score, silence_rows = read_score(score_path)
+    expected_instruments = {
+        "Violin" if instrument in {"Violin_1", "Violin_2"} else instrument
+        for instrument, seconds in song.get("instruments_time", {}).items() if seconds > 0
+    }
+    scored_instruments = set(score)
+    retained_expected = {instrument for instrument in expected_instruments
+                         if SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS.get(instrument) is not None}
+    retained_scored = {instrument for instrument in scored_instruments
+                       if SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS.get(instrument) is not None}
+    if retained_expected != retained_scored:
+        raise InvalidAlignedPiece(
+            f"Score/metadata instrument mismatch for {name}: "
+            f"metadata={sorted(retained_expected)}, score={sorted(retained_scored)}"
+        )
     audio_dir = data_root / name / mic
     if not audio_dir.is_dir():
         raise FileNotFoundError(f"SynthSOD audio directory missing: {audio_dir}")
@@ -106,7 +124,7 @@ def index_piece(song, data_root, aligned_root, mix_root, mic):
             intervals=intervals, score_path=str(score_path), activity_source="aligned_score",
         ))
     if not stems:
-        raise ValueError(f"No supported scored stems remain in {name}")
+        raise InvalidAlignedPiece(f"No supported scored stems remain in {name}")
 
     all_paths = sorted({Path(path) for stem in stems for path in stem["audio_paths"]})
     sample_rates, durations = set(), []
@@ -128,7 +146,7 @@ def index_piece(song, data_root, aligned_root, mix_root, mic):
             stem_duration = max(durations[all_paths.index(Path(path))] for path in stem["audio_paths"])
         for start, end in stem["intervals"]:
             if end > stem_duration + 0.1:
-                raise ValueError(f"Score extends beyond {stem['instrument']} audio in {name}: {end:.3f} > {stem_duration:.3f}s")
+                raise InvalidAlignedPiece(f"Score extends beyond {stem['instrument']} audio in {name}: {end:.3f} > {stem_duration:.3f}s")
             cropped_intervals += end > duration
         stem["intervals"] = clipped(stem["intervals"], duration)
 
@@ -148,6 +166,7 @@ def index_piece(song, data_root, aligned_root, mix_root, mic):
         ignored_silence_rows=silence_rows, intervals_clipped_at_track_end=cropped_intervals,
         grouped_violin_pieces=int(any(stem["instrument"] == "Violin" for stem in stems)),
         untuned_percussion_pieces_excluded_from_audio=int("untunedpercussion" in score),
+        metadata_disagreements_affecting_only_dropped_instruments=int(expected_instruments != scored_instruments),
     )
     return track, audit
 
@@ -161,6 +180,7 @@ def main():
     parser.add_argument("--mic", choices=["Tree", "Close Mic"], default="Tree")
     parser.add_argument("--workers", type=int, default=min(4, int(os.environ.get("SLURM_CPUS_PER_TASK", "4"))))
     parser.add_argument("--limit", type=int, default=0, help="Maximum pieces per split for a trial; 0 indexes all aligned pieces")
+    parser.add_argument("--strict", action="store_true", help="Stop on inconsistent annotations or missing audio instead of reporting and excluding the piece")
     args = parser.parse_args()
     if args.workers < 1 or args.limit < 0:
         parser.error("--workers must be positive and --limit nonnegative")
@@ -181,16 +201,26 @@ def main():
         raise ValueError("Aligned metadata contains no pieces")
     output.parent.mkdir(parents=True, exist_ok=True)
     mix_root.mkdir(parents=True, exist_ok=False)
-    tracks, audit_totals = {}, Counter()
+    tracks, audit_totals, excluded = {}, Counter(), []
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(index_piece, song, root / "SynthSOD_data", aligned_root, mix_root, args.mic): song["song_name"]
                    for song in songs}
         for done, future in enumerate(as_completed(futures), 1):
-            track, audit = future.result()
+            try:
+                track, audit = future.result()
+            except (InvalidAlignedPiece, FileNotFoundError) as exc:
+                if args.strict:
+                    raise
+                name = futures[future]
+                excluded.append(dict(song=name, split=aligned[name]["split"], reason=str(exc)))
+                print(f"[{done}/{len(futures)}] EXCLUDED {name}: {exc}", flush=True)
+                continue
             tracks[track["track_id"]] = track
             audit_totals.update(audit)
             if done == 1 or done % 25 == 0 or done == len(futures):
                 print(f"[{done}/{len(futures)}] indexed {futures[future]}", flush=True)
+    if not tracks:
+        raise ValueError(f"No usable pieces remain; exclusions: {excluded}")
     split_counts = Counter(track["split"] for track in tracks.values())
     target_counts, context_only = defaultdict(Counter), Counter()
     for track in tracks.values():
@@ -211,7 +241,11 @@ def main():
         indexed_split_counts=dict(split_counts), target_class_track_counts=dict(target_counts),
         context_only_pieces_filtered_by_20_class_loader=dict(context_only),
         unannotated_pieces_excluded=sorted(set(original) - set(aligned)), audit=dict(audit_totals),
+        invalid_pieces_excluded=sorted(excluded, key=lambda item: item["song"]),
+        invalid_piece_split_counts=dict(Counter(item["split"] for item in excluded)),
         notes=["Official splits preserved; no RMS fallback and no added note tails.",
+               "Inconsistent scored instruments, missing audio, and score overruns exclude the whole piece; --strict makes these fatal.",
+               "Instrument-set mismatches affecting only dropped instruments do not exclude a piece.",
                "Violin sections are a single remix unit with union score activity.",
                "Untuned percussion is excluded from both remix stems and generated full mixes.",
                "Use aligned-score release v2; extracted files do not embed a version marker."],
@@ -221,6 +255,7 @@ def main():
     for split in SYNTHSOD_SPLIT_NAMES.values():
         print(f"  {split}: {split_counts[split]} pieces ({context_only[split]} have no 20-class targets)")
     print(f"Excluded {len(set(original) - set(aligned))} pieces without aligned scores.")
+    print(f"Excluded {len(excluded)} pieces with inconsistent annotations or missing audio (see report for reasons).")
     print(f"Coverage/audit report: {report_path}")
 
 

@@ -52,8 +52,15 @@ python scripts/build_synthsod_aligned_index.py \
 
 The output index, its `.report.json` companion and mix directory must be new paths.
 The report records split counts, excluded unannotated pieces, and target coverage.
-Missing scored audio or scores cause an error instead of silently shrinking the
-dataset. `--limit N` builds a trial with up to N pieces per split; use different
+Missing score files cause an error. Pieces with missing audio, score overruns, or
+instrument-set disagreements between score and aligned metadata are excluded with
+an explicit console warning and a reason under `invalid_pieces_excluded` in the
+report. Use `--strict` to stop instead. Differences affecting only dropped untuned
+percussion do not exclude a piece. In the supplied local annotations,
+`salve_regina_orch` lists strings in its metadata but trumpet/trombone in its TXT
+score, so it is excluded rather than guessing a remapping. The expected training
+count is therefore 350 if no other audio problems are found; holdouts remain 42/91.
+`--limit N` builds a trial with up to N pieces per split; use different
 output/mix paths for trials. Full mixes are generated once, which requires audio
 decoding and disk space even though subsequent remix training reads the source
 stem excerpts directly.
@@ -74,6 +81,30 @@ The replacement probability remains the provisional 0.3 setting; measure emitted
 training-label frequencies before tuning it or the remix balancing parameters.
 
 ### Compare SynthSOD RMS activity with aligned scores
+
+To listen to the old RMS decisions, export 20 random 10-second training-piece
+crops into the same Git-ignored parent folder as the rendered Slakh comparisons:
+
+```bash
+python scripts/export_synthsod_rms_previews.py --count 20 --seed 42
+```
+
+Defaults use the original `/scratch/axs10538/datasets/synthsod/synthsod_index.pt`
+and write to `rendered_stem_pairs/synthsod_rms/`. Each example contains every
+individual stem MP3 (including RMS-inactive stems and stems absent from the RMS
+index), `full_mix.mp3`, `rms_eligible_target_mix.mp3`, and `labels.txt`/`labels.json`.
+Labels include both RMS class-union decisions and individual-stem eligibility,
+with active seconds and exact crop times. The target mix is before class dropping,
+context sampling and augmentation; it is an activity audit rather than a sampled
+balanced training submix. All audio exports share one attenuation per example,
+preserving relative stem levels. Every stem starts at the same crop offset.
+The full mix includes all physical stems, including unlabelled context and
+ambiguous percussion, so its label list describes only the configured targets.
+
+Use `--config PATH` to match another experiment's sample rate, duration, activity
+ratio and labels, or `--duration-sec 20` to override duration. Output directories
+must be new; use `--output-dir rendered_stem_pairs/synthsod_rms_seed43 --seed 43`
+for another batch. The script rejects aligned-score indexes.
 
 Use the aligned-score v2 release, extracted with `SynthSOD_score_data/` and the
 `SynthSOD_metadata_aligned_*.json` files directly under the aligned root. On the HPC:
