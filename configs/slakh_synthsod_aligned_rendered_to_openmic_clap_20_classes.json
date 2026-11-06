@@ -1,6 +1,6 @@
 {
   "experiment": {
-    "name": "slakh_synthsod_aligned_rendered_to_openmic_clap_20_class_eval",
+    "name": "slakh_synthsod_aligned_rendered_clap_19_class_synthetic_val",
     "train_domain": "synthetic",
     "eval_domain": "real",
     "run_test_after_fit": true
@@ -28,7 +28,7 @@
       "enabled": true,
       "project": "mir-instrument-classification",
       "entity": null,
-      "name": "slakh_synthsod_aligned_rendered_to_openmic_clap_20_class_balanced",
+      "name": "slakh_synthsod_aligned_rendered_clap_19_class_synthetic_val",
       "mode": null,
       "tags": [
         "slakh",
@@ -39,7 +39,8 @@
         "clap",
         "no-omitted",
         "rendered-replacements",
-        "aligned-only-synthsod"
+        "aligned-only-synthsod",
+        "combined-synthetic-validation"
       ],
       "log_model": false
     },
@@ -52,7 +53,7 @@
   },
   "data": {
     "task_type": "multilabel",
-    "num_classes": 20,
+    "num_classes": 19,
     "sample_rate": 22050,
     "clip_duration_sec": 10.0,
     "threshold": 0.5,
@@ -77,8 +78,7 @@
       "trombone",
       "trumpet",
       "ukulele",
-      "violin",
-      "voice"
+      "violin"
     ],
     "loader": {
       "batch_size": 16,
@@ -130,13 +130,46 @@
       }
     },
     "val": {
-      "type": "openmic",
-      "domain": "real",
+      "type": "slakh",
+      "domain": "synthetic",
       "input_kind": "waveform",
       "params": {
-        "root": "/scratch/jnl9728/datasets/mir_final_project/openmic-2018",
-        "split_file": "splits/openmic_20_classes/val.txt",
-        "relevance_threshold": 0.5
+        "root": "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux",
+        "split": [
+          "validation"
+        ],
+        "index_paths": [
+          "/scratch/jnl9728/datasets/mir_final_project/slakh2100_flac_redux/slakh_midi_index.pt",
+          "/scratch/mg8253/mir_instrument_classification/synthsod_aligned_stems_index.pt"
+        ],
+        "stem_remix": true,
+        "include_context_stems": true,
+        "context_stem_keep_prob": 1.0,
+        "max_context_stems": 0,
+        "max_stems_per_class": 2,
+        "class_keep_exponent": 0.0,
+        "class_keep_prob_min": 1.0,
+        "min_classes_per_crop": 1,
+        "remix_resample_attempts": 4,
+        "normalize_submix": true,
+        "rendered_stem_replacements": {
+          "probability": 0.3,
+          "roots": {
+            "banjo": "/scratch/jnl9728/synth_banjo",
+            "mandolin": "/scratch/jnl9728/synth_mandolin",
+            "ukulele": "/scratch/jnl9728/synth_ukulele"
+          }
+        },
+        "deterministic_remix": true,
+        "remix_seed": 42
+      },
+      "augmentations": {
+        "stem": {
+          "type": "identity"
+        },
+        "mix": {
+          "type": "identity"
+        }
       },
       "loader": {
         "drop_last": false

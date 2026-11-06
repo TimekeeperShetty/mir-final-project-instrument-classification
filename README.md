@@ -31,6 +31,52 @@ The pipeline currently supports:
 
 ## Typical Setup
 
+### Audit the combined training epoch and inspect 50 examples
+
+```bash
+python scripts/audit_combined_training_epoch.py --preview-count 50
+```
+
+The default config is
+`configs/slakh_synthsod_aligned_rendered_to_openmic_clap_20_classes.json`; despite
+its historical filename it has 19 target classes, excluding voice. Training uses
+Slakh train, aligned SynthSOD train, and the rendered banjo/mandolin/ukulele stems
+from training MIDIs. The audit iterates one full training-loader epoch without
+training a model, respecting batch size and `drop_last`, and counts the actual
+labels after crop activity checks, replacements, and remix class selection.
+
+While it runs, it saves examples under the Git-ignored
+`rendered_stem_pairs/combined_epoch_audit/`. Each `sample_*` folder contains the
+final `mix.mp3`, `targets.mp3`, `context.mp3` when applicable, individual selected
+stem MP3s, and `labels.txt`/`labels.json` with crop times, source paths, render
+provenance and target/context roles. Stem audio is captured from the counted
+loader call after augmentation, rather than decoded/augmented a second time.
+Stems are scaled by the mix normalization gain; all exported files share an
+additional documented attenuation to avoid clipping. With the configured identity
+mix augmentation, targets plus context reconstruct the mix before MP3 encoding.
+
+The saved examples are sampled across Slakh, render-capable Slakh and SynthSOD
+tracks; this stratifies the previews without changing the epoch distribution.
+`distribution.json` updates every ten batches and records per-label clip counts
+and percentages, selected logical stem counts, original/rendered/SynthSOD source
+contributions, context counts, empty targets and fallback usage. The final
+`distribution.csv` provides a compact table. Actual retained-render coverage is
+reported, with a warning if none survived in the epoch or saved examples.
+Use a new `--output-dir rendered_stem_pairs/combined_epoch_seed43 --seed 43`
+for another run. `--num-workers 0` is available for debugging. This exports up to
+50 examples from one audit epoch, not 50 new files per subsequent model epoch.
+
+The same config validates on the official validation subsets of Slakh and aligned
+SynthSOD, with matching rendered validation MIDIs. Validation uses fixed seeded
+crops/replacements, identity augmentation, all active target classes and all
+active context stems; grouped violin handling and the per-class stem cap remain.
+The CLI selects the checkpoint with the lowest synthetic validation loss and
+then tests it on the configured OpenMIC test subset:
+
+```bash
+python -m training_base.cli --config configs/slakh_synthsod_aligned_rendered_to_openmic_clap_20_classes.json
+```
+
 ### Build the aligned-only SynthSOD index
 
 The aligned scores cover a subset of SynthSOD. Use their existing official
@@ -77,9 +123,10 @@ untuned percussion is omitted from the stems.
 
 Use `configs/slakh_synthsod_aligned_rendered_to_openmic_clap_20_classes.json` to
 combine the Slakh index with the new aligned-only SynthSOD index and rendered
-Slakh replacements. Its training split remains `train`; the 42/91 SynthSOD
-holdout pieces remain reserved, and the experiment still validates/tests on
-OpenMIC. Existing configs and the RMS index remain available for comparison.
+Slakh replacements. Its training split remains `train`; synthetic validation uses
+the `validation` splits, including the 42 aligned SynthSOD validation candidates.
+Final testing uses OpenMIC. Existing alternative configs and the RMS index remain
+available for comparison.
 The replacement probability remains the provisional 0.3 setting; measure emitted
 training-label frequencies before tuning it or the remix balancing parameters.
 
@@ -171,6 +218,13 @@ instruments). For another listening set, use `--output-dir rendered_stem_pairs/s
 
 ### Train with rendered stem replacements
 
+Slakh and SynthSOD both treat viola, oboe, English horn, bassoon, tuba, French
+horn and piccolo as background context, rather than nearby OpenMIC targets. Their
+context identities are `viola`, `oboe`, `cor_anglais`, `bassoon`, `tuba`, `horn`
+and `piccolo`. Existing raw MIDI indexes are remapped when loaded, so this policy
+change does not require rebuilding them. Context inclusion still follows the
+configured activity threshold, keep probability and maximum context-stem count.
+
 After checking timing, the example config
 `configs/slakh_synthsod_rendered_to_openmic_clap_20_classes.json` enables replacements
 with a 0.3 probability per eligible source stem per crop. To configure another
@@ -192,7 +246,17 @@ probability check. Missing variants leave the original stem unchanged. Matching
 uses the provenance split, track, and MIDI stem, so only renders belonging to the
 selected training tracks are eligible. Replacement occurs before class selection
 and changes both the audio path and class; other retained guitar stems still
-produce a guitar label. Validation/test and SynthSOD stems are unaffected.
+produce a guitar label. SynthSOD stems are never replaced. Synthetic validation
+can opt in with `deterministic_remix: true`, using only its own split's source
+MIDIs and fixed replacement choices; OpenMIC testing does not use replacements.
+When a valid render and its source MIDI exist but the original stem audio is
+missing, the loader adds a render-only source using that MIDI's activity. It
+chooses uniformly among its available renders without the replacement coin flip,
+then applies the normal activity and class-dropping rules. Such a source does not
+create a positive label for the missing original instrument. Source split/track
+identities are preserved; missing training tracks can be assembled from their
+available original stems plus renders. This happens at load time with no index
+rebuild. Render-only sources are enabled by the same nonzero replacement setting.
 Replacement targets must be in `data.label_names`; no MIDI index rebuild is needed.
 Omit the setting or use probability 0 to disable it.
 

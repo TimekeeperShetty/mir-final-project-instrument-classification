@@ -36,12 +36,9 @@ OPENMIC_CLASS_TO_INDEX = {
 
 # This is how we group the slakh program numbers into the OpenMIC label names.
 #
-# KNOWN LIMITATION (20-class experiments): two OpenMIC classes, "mandolin" and
-# "ukulele", have no Slakh General-MIDI source here, so synthetic training can never
-# produce positive examples for them. When a 20-class config lists them, the model
-# simply never learns those two classes and they score ~0 at eval. This is reported
-# as a documented limitation for now and will be resolved once we render mandolin/
-# ukulele stems into Slakh via VST instruments (planned data augmentation step).
+# Mandolin and ukulele have no native GM mapping; configured rendered stems supply
+# their positives. Names outside OPENMIC_CLASS_TO_INDEX are background context,
+# using the same instrument identities as SynthSOD rather than nearby target names.
 SLAKH_MIDI_TO_OPENMIC_CLASS = {
     # Piano-like
     0: "piano", 1: "piano", 2: "piano", 3: "piano",
@@ -68,7 +65,7 @@ SLAKH_MIDI_TO_OPENMIC_CLASS = {
 
     # Strings mapped to closest OpenMIC classes
     40: "violin",
-    41: "violin",
+    41: "viola",
     42: "cello",
     44: "violin",
     45: "violin",
@@ -87,22 +84,22 @@ SLAKH_MIDI_TO_OPENMIC_CLASS = {
     # Brass
     56: "trumpet",
     57: "trombone",
-    58: "trombone",
+    58: "tuba",
     59: "trumpet",
-    60: "trumpet",
+    60: "horn",
     61: "trumpet",
     62: "synthesizer",
     63: "synthesizer",
 
     # Reed / sax
     64: "saxophone", 65: "saxophone", 66: "saxophone", 67: "saxophone",
-    68: "clarinet",
-    69: "clarinet",
-    70: "clarinet",
+    68: "oboe",
+    69: "cor_anglais",
+    70: "bassoon",
     71: "clarinet",
 
     # Flutes / pipe
-    72: "flute", 73: "flute", 74: "flute", 75: "flute",
+    72: "piccolo", 73: "flute", 74: "flute", 75: "flute",
     76: "flute", 77: "flute", 78: "flute", 79: "flute",
 
     # Synth
@@ -149,9 +146,8 @@ SLAKH_MIDI_TO_OPENMIC_CLASS = {
 # the violin stem out of the clip, so the cost is fewer clips, not wrong labels.
 #
 # Every other instrument without a matching target class is context, including ones whose
-# sound is close to a target class: viola (violin), timpani (drums) and horn (Slakh maps
-# French horn to trumpet). The model hears them labelled "absent", which is the correct
-# OpenMIC answer for all three.
+# sound is close to a target class. Viola, oboe, English horn, bassoon, tuba,
+# French horn and piccolo use the same context identities in both datasets.
 #
 # Untuned percussion is the one stem mapped to None, so it is left out of the audio
 # entirely. It holds real cymbals and drums, which are OpenMIC classes, but the stem does
@@ -229,9 +225,7 @@ def program_to_openmic_class_id(program: int, is_drum: bool) -> int:
     # Still, a few scripts want the old fixed integer OpenMIC ids, so this wrapper keeps
     # that interface around.
     class_name = program_to_openmic_class_name(program, is_drum=is_drum)
-    if class_name is None:
-        return -1
-    return OPENMIC_CLASS_TO_INDEX[class_name]
+    return OPENMIC_CLASS_TO_INDEX.get(class_name, -1)
 
 
 # the following helpers are just for reading the config values and passing them into

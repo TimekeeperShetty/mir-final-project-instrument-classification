@@ -153,6 +153,9 @@ class SlakhDataset(Dataset):
         
         # Fast membership check for "is this class allowed in this experiment?"
         self.allowed_class_names = set(self.class_name_to_index)
+        self.rendered_replacements_requested = (self.train_mode or bool(params.get("deterministic_remix", False))) and float(
+            (params.get("rendered_stem_replacements") or {}).get("probability", 0.0)
+        ) > 0.0
         
         # Enable the on-the-fly stem remix path only when requested
         self.stem_remix_enabled = bool(params.get("stem_remix", self.train_mode and task_type == "multilabel"))
@@ -302,7 +305,7 @@ class SlakhDataset(Dataset):
                 item.get("raw_stems", []),
                 allowed_class_names=self.allowed_class_names,
             )
-            if self.task_type == "multilabel" and not class_intervals:
+            if self.task_type == "multilabel" and not class_intervals and not self.rendered_replacements_requested:
                 continue
             remapped_item = dict(item)
             remapped_item["stems"] = mapped_stems
@@ -408,7 +411,7 @@ class SlakhDataset(Dataset):
                 raw_stem_entries,
                 allowed_class_names=self.allowed_class_names,
             )
-            if not class_intervals:
+            if not class_intervals and not self.rendered_replacements_requested:
                 # If nothing from this track maps into our configured label set, drop it.
                 continue
 
@@ -445,7 +448,7 @@ class SlakhDataset(Dataset):
 
     def _prepare_rendered_stem_replacements(self, params: Dict[str, Any]) -> None:
         cfg = params.get("rendered_stem_replacements", {})
-        self.rendered_replacement_probability = float(cfg.get("probability", 0.0)) if self.train_mode else 0.0
+        self.rendered_replacement_probability = float(cfg.get("probability", 0.0)) if (self.train_mode or self.deterministic_remix) else 0.0
         if not 0.0 <= self.rendered_replacement_probability <= 1.0:
             raise ValueError("rendered_stem_replacements.probability must be between 0 and 1")
         if self.rendered_replacement_probability == 0.0:
@@ -456,21 +459,99 @@ class SlakhDataset(Dataset):
         if not roots or any(name not in self.allowed_class_names for name in roots):
             raise ValueError("Rendered replacement roots must name instruments in data.label_names")
         by_source: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+        requested_splits = {self._canonical_split_name(split) for split in normalize_split_list(params.get("split", "train"))}
         for record in discover_rendered_stems(roots):
-            by_source[record["key"]].append(record)
-        matches = 0
-        for item in self.samples:
-            for stem in item.get("stems", []) + item.get("context_stems", []):
-                # SynthSOD carries an instrument name; its stems are never replaced.
-                if stem.get("instrument") is not None or not stem.get("midi_path"):
-                    continue
-                variants = by_source.get(source_midi_key(Path(stem["midi_path"])), [])
-                if variants:
-                    stem["rendered_variants"] = variants
-                    matches += 1
+            if record["key"][0] in requested_splits:
+                by_source[record["key"]].append(record)
+        by_track = defaultdict(dict)
+        for key, variants in by_source.items():
+            by_track[key[:2]][key] = variants
+        items_by_track = {
+            (self._canonical_split_name(item["split"]), str(item.get("track_id"))): item
+            for item in self.samples if str(item.get("track_id", "")).startswith("Track")
+        }
+        dataset_roots = get_root_paths(params)
+
+        def resolve_midi(key, variants, item):
+            split, track, stem_id = key
+            candidates = []
+            if item is not None and item.get("audio_path"):
+                candidates.append(Path(item["audio_path"]).parent / "MIDI" / f"{stem_id}.mid")
+            aliases = {"omitted": ["omitted", "ommited"], "validation": ["validation", "val", "vallidation"]}.get(split, [split])
+            candidates.extend(root / alias / track / "MIDI" / f"{stem_id}.mid"
+                              for root in dataset_roots for alias in aliases)
+            candidates.extend(Path(variant["source_midi"]) for variant in variants)
+            for candidate in candidates:
+                if candidate.is_file() and source_midi_key(candidate) == key:
+                    return candidate
+            raise FileNotFoundError(f"Source MIDI missing for rendered stem {key}; checked {candidates}")
+
+        matches = rendered_only = added_tracks = 0
+        for track_key, sources in by_track.items():
+            item = items_by_track.get(track_key)
+            new_track = item is None
+            if new_track:
+                first_key = next(iter(sources))
+                midi_path = resolve_midi(first_key, sources[first_key], None)
+                track_dir = midi_path.parent.parent
+                metadata_path = track_dir / "metadata.yaml"
+                metadata = yaml.safe_load(metadata_path.read_text()) or {} if metadata_path.is_file() else {}
+                raw_stems = build_slakh_track_stem_entries(track_dir, metadata.get("stems", {}))
+                all_stems, _ = materialize_slakh_label_view(raw_stems)
+                item = dict(track_id=track_key[1], sample_id=f"slakh/{track_key[0]}/{track_key[1]}",
+                            split=track_key[0], audio_path=None, requires_stem_remix=True,
+                            duration_sec=0.0, raw_stems=raw_stems, stems=all_stems, context_stems=[], class_intervals={})
+                self.samples.append(item)
+                items_by_track[track_key] = item
+                added_tracks += 1
+            all_stems = list(item.get("stems", [])) + list(item.get("context_stems", []))
+            existing = {source_midi_key(Path(stem["midi_path"])): stem
+                        for stem in all_stems if stem.get("instrument") is None and stem.get("midi_path")}
+            for key, variants in sources.items():
+                stem = existing.get(key)
+                if stem is None:
+                    midi_path = resolve_midi(key, variants, item)
+                    intervals = union_intervals(midi_note_intervals(midi_path))
+                    if not intervals:
+                        raise ValueError(f"Rendered stem source MIDI has no note activity: {midi_path}")
+                    stem = dict(stem_id=key[2], instrument=None, midi_path=midi_path,
+                                program_num=-1, is_drum=False, intervals=intervals, rendered_only=True)
+                    all_stems.append(stem)
+                elif not all(Path(path).is_file() for path in stem.get("audio_paths") or [stem["audio_path"]]):
+                    stem["midi_path"] = resolve_midi(key, variants, item)
+                    stem["rendered_only"] = True
+                stem["rendered_variants"] = variants
+                if stem.get("rendered_only"):
+                    # No original audio exists: always choose a render, then let
+                    # the usual activity/class-selection policy decide whether to keep it.
+                    stem.update(audio_path=variants[0]["audio_path"], audio_paths=[variants[0]["audio_path"]],
+                                class_name=variants[0]["class_name"])
+                    rendered_only += 1
+                matches += 1
+            item["stems"] = [stem for stem in all_stems if stem["class_name"] in self.allowed_class_names]
+            item["context_stems"] = [stem for stem in all_stems if stem["class_name"] not in self.allowed_class_names]
+            available = defaultdict(list)
+            for stem in all_stems:
+                names = {stem["class_name"]} | {variant["class_name"] for variant in stem.get("rendered_variants", [])}
+                for name in names & self.allowed_class_names:
+                    available[name].extend(stem["intervals"])
+            # These are availability counts; crop targets still use the chosen render only.
+            item["class_intervals"] = {name: union_intervals(spans) for name, spans in available.items()}
+            if new_track:
+                paths = {Path(path) for stem in all_stems for path in stem.get("audio_paths") or [stem["audio_path"]]}
+                durations = []
+                for path in paths:
+                    if audio.AudioFile is None:
+                        durations.append(get_audio_duration_sec(path))
+                    else:
+                        with audio.AudioFile(str(path)) as handle:
+                            durations.append(float(handle.frames) / float(handle.samplerate))
+                item["duration_sec"] = max(durations)
         if not matches:
             raise ValueError("No rendered stems match the selected Slakh tracks/splits")
-        print(f"Rendered replacements available for {matches} source stems; probability={self.rendered_replacement_probability}")
+        self.samples = [item for item in self.samples if item.get("class_intervals")]
+        print(f"Rendered variants available for {matches} source stems; {rendered_only} have no original audio; "
+              f"added {added_tracks} tracks. Original-audio replacement probability={self.rendered_replacement_probability}")
 
     def _collect_remix_stems(
         self,
@@ -484,7 +565,7 @@ class SlakhDataset(Dataset):
         for source in item.get("stems", []) + item.get("context_stems", []):
             stem = source
             variants = source.get("rendered_variants", [])
-            if variants and self._rand_unit(generator) < self.rendered_replacement_probability:
+            if variants and (source.get("rendered_only") or self._rand_unit(generator) < self.rendered_replacement_probability):
                 variant = variants[self._randperm(len(variants), generator)[0]]
                 # Copy, retaining source MIDI intervals and the common crop offset.
                 # Rendered audio must preserve MIDI t=0; audition the exports first.
@@ -730,7 +811,11 @@ class SlakhDataset(Dataset):
         self,
         selected_stems: List[Dict[str, Any]],
         offset: int,
+        *,
+        export_audio: Optional[Dict[str, Any]] = None,
     ) -> torch.Tensor:
+        if export_audio is not None:
+            export_audio.update(stems=[], normalization_gain=1.0)
         # Empty submix should still return a valid waveform tensor.
         if not selected_stems:
             return torch.zeros(self.clip_num_samples, dtype=torch.float32)
@@ -738,7 +823,17 @@ class SlakhDataset(Dataset):
         # Start from silence, then add each kept stem.
         mixture = torch.zeros(self.clip_num_samples, dtype=torch.float32)
         for stem in selected_stems:
-            mixture = mixture + self._load_stem_excerpt(stem, offset)
+            stem_audio = self._load_stem_excerpt(stem, offset)
+            mixture = mixture + stem_audio
+            if export_audio is not None:
+                export_audio["stems"].append(dict(
+                    audio=stem_audio, stem_id=stem["stem_id"], class_name=stem["class_name"],
+                    role="target" if stem["class_name"] in self.allowed_class_names else "context",
+                    active_sec=float(stem.get("active_sec", 0.0)),
+                    source_audio_paths=[str(path) for path in stem.get("audio_paths") or [stem["audio_path"]]],
+                    replacement_provenance=stem.get("replacement_provenance"),
+                    rendered_only=bool(stem.get("rendered_only")),
+                ))
 
         # Apply optional mix-level augmentation after summing stems.
         mixture = self.mix_augmenter(mixture)
@@ -765,6 +860,8 @@ class SlakhDataset(Dataset):
             # Peak-normalize to avoid very large amplitudes when many stems are summed.
             peak = mixture.abs().max().clamp_min(1e-6)
             mixture = mixture / peak
+            if export_audio is not None:
+                export_audio["normalization_gain"] = float(1.0 / peak)
         return torch.nan_to_num(mixture.float(), nan=0.0, posinf=1.0, neginf=-1.0)
 
     def _build_submix_target(self, kept_classes: List[str]) -> torch.Tensor:
@@ -845,7 +942,8 @@ class SlakhDataset(Dataset):
 
             # Render the final training waveform from the target stems plus optional
             # background context stems.
-            excerpt = self._mix_selected_stems(selected_stems, offset)
+            rendered_audio = {} if export_debug else None
+            excerpt = self._mix_selected_stems(selected_stems, offset, export_audio=rendered_audio)
             # The target is built from the kept target classes only, never from the
             # extra context stems.
             target = self._build_submix_target(kept_classes)
@@ -868,6 +966,8 @@ class SlakhDataset(Dataset):
                     for stem in selected_stems
                 ],
             }
+            if export_debug:
+                debug_payload["rendered_audio"] = rendered_audio
             return excerpt, target, debug_payload
 
         # Final fallback if every retry landed on empty configured activity.
@@ -888,7 +988,8 @@ class SlakhDataset(Dataset):
             selected_target_stems.extend(self._choose_stems_for_class(active_by_class[class_name], generator=generator))
         selected_context_stems = self._choose_context_stems(active_context_by_class, generator=generator)
         selected_stems = list(selected_target_stems) + list(selected_context_stems)
-        excerpt = self._mix_selected_stems(selected_stems, 0)
+        rendered_audio = {} if export_debug else None
+        excerpt = self._mix_selected_stems(selected_stems, 0, export_audio=rendered_audio)
         target = self._build_submix_target(kept_classes)
         debug_payload = {
             "offset": 0,
@@ -909,6 +1010,8 @@ class SlakhDataset(Dataset):
                 for stem in selected_stems
             ],
         }
+        if export_debug:
+            debug_payload["rendered_audio"] = rendered_audio
         return excerpt, target, debug_payload
 
     def _add_multiclass_samples(self, stems_dir: Path, stems_metadata: Dict[str, Any]) -> None:
