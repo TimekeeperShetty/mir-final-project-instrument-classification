@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export random rendered/original Slakh stems as time-preserving listening pairs."""
+"""Export rendered Slakh stems paired with original stems, or full mixes when stems are missing."""
 from __future__ import annotations
 
 import argparse
@@ -58,9 +58,15 @@ def main() -> None:
             source_track = args.slakh_root.expanduser() / "ommited" / track
         original = source_track / "stems" / f"{stem}.flac"
         midi = source_track / "MIDI" / f"{stem}.mid"
-        if not original.is_file() or not midi.is_file():
-            raise FileNotFoundError(f"Original Slakh audio/MIDI missing: {original}, {midi}")
-        record = dict(record, original_path=original, local_source_midi=midi)
+        if not midi.is_file():
+            raise FileNotFoundError(f"Original Slakh MIDI missing: {midi}")
+        original_kind = "stem"
+        if not original.is_file():
+            original = source_track / "mix.flac"
+            original_kind = "full_mix"
+            if not original.is_file():
+                raise FileNotFoundError(f"Neither original stem audio nor full mix found for {midi}")
+        record = dict(record, original_path=original, original_kind=original_kind, local_source_midi=midi)
         by_track.setdefault((split, track), []).append(record)
     if len(by_track) < args.count:
         raise ValueError(f"Requested {args.count} distinct tracks, but only {len(by_track)} have matching renders")
@@ -77,13 +83,14 @@ def main() -> None:
         pair_dir = output_dir / f"{number:02d}_{split}_{track}_{stem}_{instrument}"
         pair_dir.mkdir()
         base = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-n"]
-        original_mp3 = pair_dir / "original.mp3"
+        original_label = "original_full_mix" if record["original_kind"] == "full_mix" else "original"
+        original_mp3 = pair_dir / f"{original_label}.mp3"
         rendered_mp3 = pair_dir / f"{instrument}.mp3"
         for source, destination in ((record["original_path"], original_mp3),
                                     (record["audio_path"], rendered_mp3)):
             subprocess.run(base + ["-i", str(source), "-map", "0:a:0", "-ac", "1", "-ar", "44100",
                                   "-c:a", "libmp3lame", "-q:a", "2", str(destination)], check=True)
-        comparison = pair_dir / "comparison_left_original_right_rendered.mp3"
+        comparison = pair_dir / f"comparison_left_{original_label}_right_rendered.mp3"
         # Keep t=0 and leading silence. The shorter input is padded by amix.
         filters = (
             "[0:a:0]aformat=sample_rates=44100:channel_layouts=mono,"
@@ -99,7 +106,7 @@ def main() -> None:
         entry.update(original_mp3=str(original_mp3), rendered_mp3=str(rendered_mp3), comparison_mp3=str(comparison))
         manifest.append(entry)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        print(f"[{number}/{len(chosen)}] {pair_dir.name}", flush=True)
+        print(f"[{number}/{len(chosen)}] {pair_dir.name} (reference: {record['original_kind']})", flush=True)
     print(f"Exported full-length pairs to {output_dir}; original LEFT, rendered RIGHT.")
 
 
