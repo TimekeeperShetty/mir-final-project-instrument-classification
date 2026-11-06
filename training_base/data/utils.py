@@ -161,6 +161,7 @@ SLAKH_MIDI_TO_OPENMIC_CLASS = {
 # briefing. Change that line if the team decides otherwise; no index rebuild is needed
 # because the mapping is applied at load time.
 SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS = {
+    "Violin": "violin",  # Aligned scores combine both sections into one logical stem.
     "Violin_1": "violin",
     "Violin_2": "violin",
     "Viola": "viola",
@@ -569,6 +570,7 @@ def normalize_slakh_index_payload(payload: Any) -> List[Dict[str, Any]]:
                 {
                     "stem_id": stem.get("stem_id"),
                     "audio_path": Path(stem["audio_path"]),
+                    "audio_paths": [Path(path) for path in stem["audio_paths"]] if stem.get("audio_paths") else None,
                     "midi_path": Path(stem["midi_path"]) if stem.get("midi_path") else None,
                     "program_num": int(stem.get("program_num", -1)),
                     "is_drum": bool(stem.get("is_drum", False)),

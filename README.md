@@ -31,6 +31,48 @@ The pipeline currently supports:
 
 ## Typical Setup
 
+### Build the aligned-only SynthSOD index
+
+The aligned scores cover a subset of SynthSOD. Use their existing official
+partitions: the supplied release has 351 train, 42 evaluation, and 91 test pieces.
+No random re-split is needed. `evaluation` is stored as `validation` for the loader.
+The builder cross-checks membership against the original SynthSOD split metadata
+and excludes pieces without aligned scores; it never falls back to RMS.
+
+On the HPC, with the v2 aligned-score release extracted:
+
+```bash
+python scripts/build_synthsod_aligned_index.py \
+  --root /scratch/axs10538/datasets/synthsod/SynthSOD \
+  --aligned-root /scratch/mg8253/mir_instrument_classification/SynthSOD_aligned_scores \
+  --output /scratch/mg8253/mir_instrument_classification/synthsod_aligned_index.pt \
+  --mix-root /scratch/mg8253/mir_instrument_classification/synthsod_aligned_mixes \
+  --workers 4
+```
+
+The output index, its `.report.json` companion and mix directory must be new paths.
+The report records split counts, excluded unannotated pieces, and target coverage.
+Missing scored audio or scores cause an error instead of silently shrinking the
+dataset. `--limit N` builds a trial with up to N pieces per split; use different
+output/mix paths for trials. Full mixes are generated once, which requires audio
+decoding and disk space even though subsequent remix training reads the source
+stem excerpts directly.
+
+Intervals are unions of aligned note start/end times, with silence rows ignored
+and no RMS thresholds or added release tails. Since program 40 merges violin
+sections, both section files are read at the same offset and summed as one logical
+violin stem before augmentation. Sections cannot be independently dropped. Other
+instruments retain their individual activity and normal remix behavior. Ambiguous
+untuned percussion is omitted from the stems and the generated full mixes.
+
+Use `configs/slakh_synthsod_aligned_rendered_to_openmic_clap_20_classes.json` to
+combine the Slakh index with the new aligned-only SynthSOD index and rendered
+Slakh replacements. Its training split remains `train`; the 42/91 SynthSOD
+holdout pieces remain reserved, and the experiment still validates/tests on
+OpenMIC. Existing configs and the RMS index remain available for comparison.
+The replacement probability remains the provisional 0.3 setting; measure emitted
+training-label frequencies before tuning it or the remix balancing parameters.
+
 ### Compare SynthSOD RMS activity with aligned scores
 
 Use the aligned-score v2 release, extracted with `SynthSOD_score_data/` and the

@@ -480,7 +480,7 @@ class SlakhDataset(Dataset):
                 variant = variants[self._randperm(len(variants), generator)[0]]
                 # Copy, retaining source MIDI intervals and the common crop offset.
                 # Rendered audio must preserve MIDI t=0; audition the exports first.
-                stem = dict(source, audio_path=variant["audio_path"], class_name=variant["class_name"],
+                stem = dict(source, audio_path=variant["audio_path"], audio_paths=[variant["audio_path"]], class_name=variant["class_name"],
                             replacement_provenance=str(variant["provenance_path"]))
             (target_stems if stem["class_name"] in self.allowed_class_names else context_stems).append(stem)
         return (
@@ -708,12 +708,12 @@ class SlakhDataset(Dataset):
     def _load_stem_excerpt(self, stem: Dict[str, Any], offset: int) -> torch.Tensor:
         # Read only the crop window from disk, the same window used for the whole example.
         # Reading the full stem first would cost gigabytes per clip on hour-long pieces.
-        waveform = audio.load_waveform_excerpt(str(stem["audio_path"]), self.sample_rate, offset, self.clip_num_samples)
-        excerpt = audio.trim_or_pad(
-            waveform,
-            self.clip_num_samples,
-            random_crop=False,
-        )
+        # A score-backed violin stem includes both sections, which must survive or
+        # be dropped together because the aligned score has no section identity.
+        excerpt = torch.zeros(self.clip_num_samples, dtype=torch.float32)
+        for path in stem.get("audio_paths") or [stem["audio_path"]]:
+            waveform = audio.load_waveform_excerpt(str(path), self.sample_rate, offset, self.clip_num_samples)
+            excerpt = excerpt + audio.trim_or_pad(waveform, self.clip_num_samples, random_crop=False)
         # Apply optional stem-level augmentation before mixing.
         excerpt = self.stem_augmenter(excerpt)
         return excerpt
