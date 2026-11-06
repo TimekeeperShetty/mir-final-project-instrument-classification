@@ -31,6 +31,46 @@ The pipeline currently supports:
 
 ## Typical Setup
 
+### Compare SynthSOD RMS activity with aligned scores
+
+Use the aligned-score v2 release, extracted with `SynthSOD_score_data/` and the
+`SynthSOD_metadata_aligned_*.json` files directly under the aligned root. On the HPC:
+
+```bash
+python scripts/compare_synthsod_activity.py \
+  --rms-index /scratch/axs10538/datasets/synthsod/synthsod_index.pt \
+  --aligned-root /scratch/mg8253/mir_instrument_classification/SynthSOD_aligned_scores \
+  --synthsod-root /scratch/axs10538/datasets/synthsod/SynthSOD \
+  --config configs/slakh_synthsod_rendered_to_openmic_clap_20_classes.json \
+  --split train --crops-per-piece 200
+```
+
+The command reads cached RMS intervals and TXT note timings without decoding audio
+or changing the index. It preserves official splits, ignores silence rows
+(`MIDI_Instrument=-1`), and unions overlapping notes. Reports go to the Git-ignored
+`outputs/synthsod_activity_comparison/`: `summary.json` contains per-instrument and
+per-class time/crop metrics and coverage gaps, `per_piece.csv` identifies outliers,
+and `crop_disagreements.jsonl` lists disagreeing crop locations. Output directories
+must be new; pass `--output-dir outputs/another_comparison` for another run.
+Use `--limit 20` for a quick subset or `--split all` for separate split reports.
+
+`score_only` means the score marks activity that RMS misses; `rms_only` means RMS
+marks activity outside the score. Precision/recall use scores as a reference, not
+as exact acoustic ground truth. Positive-crop disagreement excludes agreement on
+silence, so long rests cannot hide errors. Crops use the configured sample rate,
+duration and activity ratio, before stochastic remix dropping or replacements.
+`class_union` compares pooled class activity; `remix_eligibility` checks whether
+an individual RMS stem passes the loader's activity rule. Violin sections share
+program 40 in the TXT scores, so their score activity is combined: violin remix
+eligibility is explicitly marked as ambiguous at section level. Do not assign
+the pooled violin timings independently to each section stem in a future index.
+
+`Close Mic` and `Tree` are microphone perspectives of the same performances:
+Close Mic is the driest available perspective, while Tree includes the Decca Tree
+stereo room/reverb perspective. The current index builder defaults to Close Mic
+for RMS activity and Tree for training audio. Note ends and acoustic decay can
+therefore differ even with correct temporal alignment.
+
 ### Audition rendered Slakh instruments
 
 On the HPC, with `ffmpeg` (including `libmp3lame`) on PATH, run from the repository root:
