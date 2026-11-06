@@ -16,6 +16,7 @@ from tqdm import tqdm
 from . import audio
 from .augmentations import build_augmenter
 from .openmic_dataset_loader import OpenMicDataset
+from .rendered_stems import discover_rendered_stems, source_midi_key
 from .utils import (
     OPENMIC_CLASS_TO_INDEX,
     build_slakh_track_class_intervals,
@@ -240,6 +241,7 @@ class SlakhDataset(Dataset):
                     split_dir = self._resolve_split_dir(root, split_name)
                     self._build_index(split_dir)
 
+        self._prepare_rendered_stem_replacements(params)
         # Count how many training tracks contain each class at all.
         self.class_track_counts = self._compute_class_track_counts()
         # Convert those counts into keep probabilities used by the remix policy.
@@ -433,12 +435,68 @@ class SlakhDataset(Dataset):
             allowed_class_names=self.allowed_class_names,
         )
 
+    def _prepare_rendered_stem_replacements(self, params: Dict[str, Any]) -> None:
+        cfg = params.get("rendered_stem_replacements", {})
+        self.rendered_replacement_probability = float(cfg.get("probability", 0.0)) if self.train_mode else 0.0
+        if not 0.0 <= self.rendered_replacement_probability <= 1.0:
+            raise ValueError("rendered_stem_replacements.probability must be between 0 and 1")
+        if self.rendered_replacement_probability == 0.0:
+            return
+        if self.task_type != "multilabel" or not self.stem_remix_enabled:
+            raise ValueError("Rendered stem replacements require multilabel training with stem_remix=true")
+        roots = cfg.get("roots", {})
+        if not roots or any(name not in self.allowed_class_names for name in roots):
+            raise ValueError("Rendered replacement roots must name instruments in data.label_names")
+        by_source: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+        for record in discover_rendered_stems(roots):
+            by_source[record["key"]].append(record)
+        matches = 0
+        for item in self.samples:
+            for stem in item.get("stems", []) + item.get("context_stems", []):
+                # SynthSOD carries an instrument name; its stems are never replaced.
+                if stem.get("instrument") is not None or not stem.get("midi_path"):
+                    continue
+                variants = by_source.get(source_midi_key(Path(stem["midi_path"])), [])
+                if variants:
+                    stem["rendered_variants"] = variants
+                    matches += 1
+        if not matches:
+            raise ValueError("No rendered stems match the selected Slakh tracks/splits")
+        print(f"Rendered replacements available for {matches} source stems; probability={self.rendered_replacement_probability}")
+
+    def _collect_remix_stems(
+        self,
+        item: Dict[str, Any],
+        crop_start_sec: float,
+        crop_end_sec: float,
+        *,
+        generator: Optional[torch.Generator] = None,
+    ) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, List[Dict[str, Any]]]]:
+        target_stems, context_stems = [], []
+        for source in item.get("stems", []) + item.get("context_stems", []):
+            stem = source
+            variants = source.get("rendered_variants", [])
+            if variants and self._rand_unit(generator) < self.rendered_replacement_probability:
+                variant = variants[self._randperm(len(variants), generator)[0]]
+                # Copy, retaining source MIDI intervals and the common crop offset.
+                # Rendered audio must preserve MIDI t=0; audition the exports first.
+                stem = dict(source, audio_path=variant["audio_path"], class_name=variant["class_name"],
+                            replacement_provenance=str(variant["provenance_path"]))
+            (target_stems if stem["class_name"] in self.allowed_class_names else context_stems).append(stem)
+        return (
+            self._collect_active_stems(target_stems, crop_start_sec, crop_end_sec),
+            self._collect_active_stems(context_stems, crop_start_sec, crop_end_sec),
+        )
+
     def _compute_class_track_counts(self) -> Dict[str, int]:
         # Count track presence, not note count and not total active duration.
         counts = {class_name: 0 for class_name in self.label_names}
         for item in self.samples:
             # We only count a class once per track, even if the track has many stems of that class.
             present_classes = set(item.get("class_intervals", {}).keys())
+            # Include replacement availability when balancing the combined label space.
+            for stem in item.get("stems", []) + item.get("context_stems", []):
+                present_classes.update(variant["class_name"] for variant in stem.get("rendered_variants", []))
             for class_name in present_classes:
                 if class_name in counts:
                     counts[class_name] += 1
@@ -753,7 +811,9 @@ class SlakhDataset(Dataset):
                 return excerpt.float(), target, debug_payload
 
             # Training with remix first determines which stems are active in the crop.
-            active_by_class = self._collect_active_stems(item.get("stems", []), crop_start_sec, crop_end_sec)
+            active_by_class, active_context_by_class = self._collect_remix_stems(
+                item, crop_start_sec, crop_end_sec, generator=generator
+            )
             if not active_by_class:
                 # Retry if none of the configured classes is active in this crop.
                 continue
@@ -771,11 +831,6 @@ class SlakhDataset(Dataset):
                 # If everything was removed, try another crop.
                 continue
 
-            active_context_by_class = self._collect_active_stems(
-                item.get("context_stems", []),
-                crop_start_sec,
-                crop_end_sec,
-            )
             selected_context_stems = self._choose_context_stems(active_context_by_class, generator=generator)
 
             selected_stems = list(selected_target_stems) + list(selected_context_stems)
@@ -799,6 +854,7 @@ class SlakhDataset(Dataset):
                         "class_name": stem["class_name"],
                         "program_num": stem["program_num"],
                         "active_sec": round(float(stem["active_sec"]), 4),
+                        "replacement_provenance": stem.get("replacement_provenance"),
                         "role": "target" if stem in selected_target_stems else "context",
                     }
                     for stem in selected_stems
@@ -815,12 +871,13 @@ class SlakhDataset(Dataset):
         # under an all-zero label.
         # Here every active target class is kept, so the label matches the audio.
         crop_end_sec = self.clip_num_samples / self.sample_rate
-        active_by_class = self._collect_active_stems(item.get("stems", []), 0.0, crop_end_sec)
+        active_by_class, active_context_by_class = self._collect_remix_stems(
+            item, 0.0, crop_end_sec, generator=generator
+        )
         kept_classes = list(active_by_class.keys())
         selected_target_stems: List[Dict[str, Any]] = []
         for class_name in kept_classes:
             selected_target_stems.extend(self._choose_stems_for_class(active_by_class[class_name], generator=generator))
-        active_context_by_class = self._collect_active_stems(item.get("context_stems", []), 0.0, crop_end_sec)
         selected_context_stems = self._choose_context_stems(active_context_by_class, generator=generator)
         selected_stems = list(selected_target_stems) + list(selected_context_stems)
         excerpt = self._mix_selected_stems(selected_stems, 0)
@@ -838,6 +895,7 @@ class SlakhDataset(Dataset):
                     "class_name": stem["class_name"],
                     "program_num": stem["program_num"],
                     "active_sec": round(float(stem["active_sec"]), 4),
+                    "replacement_provenance": stem.get("replacement_provenance"),
                     "role": "target" if stem in selected_target_stems else "context",
                 }
                 for stem in selected_stems

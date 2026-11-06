@@ -45,3 +45,6 @@ jobs/
 
 dataset_stats.json
 dataset_stats_balanced.json
+
+# Rendered/original Slakh listening exports
+/rendered_stem_pairs/
