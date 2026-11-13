@@ -18,6 +18,7 @@ from .augmentations import build_augmenter
 from .openmic_dataset_loader import OpenMicDataset
 from .rendered_stems import discover_rendered_stems, source_midi_key
 from .utils import (
+    DEFAULT_SOUND_ALIKE_NEGATIVES,
     OPENMIC_CLASS_TO_INDEX,
     build_slakh_track_class_intervals,
     build_slakh_track_stem_entries,
@@ -205,6 +206,9 @@ class SlakhDataset(Dataset):
         # Mix-level augmenter runs after stems have been summed
         self.mix_augmenter = build_augmenter(augmentations_cfg.get("mix"))
 
+        # Optional per-clip label masking ("label_exposure"); see _build_label_exposure_mask.
+        self._configure_label_exposure(params.get("label_exposure"))
+
         # This is the final list of samples used by __getitem__.
         self.samples: List[Dict[str, Any]] = []
         if index_paths:
@@ -250,6 +254,85 @@ class SlakhDataset(Dataset):
         # Convert those counts into keep probabilities used by the remix policy.
         self.class_keep_probabilities = self._compute_class_keep_probabilities()
 
+
+    def _configure_label_exposure(self, cfg: Optional[Dict[str, Any]]) -> None:
+        # label_exposure decides which labels of a synthetic clip reach the loss:
+        # - every positive (kept target class)
+        # - "absent" for each class whose sound-alike is audible in the clip
+        # - "absent" for each remaining class with random_negative_prob (per-class overrides allowed)
+        # Everything else is masked out. Without the random share, a class that has no
+        # sound-alike in the clip would never see a negative and would drift to "always present".
+        cfg = cfg or {}
+        self.label_exposure_enabled = bool(cfg.get("enabled", False))
+        if not self.label_exposure_enabled:
+            return
+        if self.task_type != "multilabel" or not self.stem_remix_enabled or not (self.train_mode or self.deterministic_remix):
+            # The full-mix crop path has no stem selection to build a mask from.
+            raise ValueError("label_exposure requires multilabel stem_remix=true on a training (or deterministic-remix) split")
+
+        def check_prob(name: str, value: Any) -> float:
+            value = float(value)
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"label_exposure {name} must be between 0 and 1 (got {value})")
+            return value
+
+        default_prob = check_prob("random_negative_prob", cfg.get("random_negative_prob", 0.2))
+        per_class = cfg.get("random_negative_prob_per_class") or {}
+        unknown = sorted(set(per_class) - self.allowed_class_names)
+        if unknown:
+            raise ValueError(f"label_exposure.random_negative_prob_per_class names classes not in label_names: {unknown}")
+        self.random_negative_prob = {
+            name: check_prob(f"random_negative_prob_per_class[{name}]", per_class.get(name, default_prob))
+            for name in self.label_names
+        }
+
+        sound_alikes = cfg.get("sound_alikes")
+        if sound_alikes is None:
+            sound_alikes = DEFAULT_SOUND_ALIKE_NEGATIVES
+        # Classes outside label_names have no output, so their entries are dropped here.
+        self.sound_alike_negatives = {
+            name: frozenset(alikes) for name, alikes in sound_alikes.items() if name in self.allowed_class_names
+        }
+
+    def _build_label_exposure_mask(
+        self,
+        kept_classes: List[str],
+        selected_stems: List[Dict[str, Any]],
+        *,
+        generator: Optional[torch.Generator] = None,
+    ) -> Tuple[torch.Tensor, Dict[str, List[str]]]:
+        # Only stems actually summed into the clip count as audible. Target classes that
+        # the remix dropped are not in the audio, so they never trigger a sound-alike.
+        audible = {stem["class_name"] for stem in selected_stems}
+        positives = set(kept_classes)
+        mask = torch.zeros(self.num_classes, dtype=torch.float32)
+        hard_negatives: List[str] = []
+        random_negatives: List[str] = []
+        for class_name, class_id in self.class_name_to_index.items():
+            if class_name in positives:
+                mask[class_id] = 1.0
+            elif self.sound_alike_negatives.get(class_name, frozenset()) & audible:
+                mask[class_id] = 1.0
+                hard_negatives.append(class_name)
+            elif self._rand_unit(generator) < self.random_negative_prob[class_name]:
+                mask[class_id] = 1.0
+                random_negatives.append(class_name)
+        return mask, {"hard_negatives": hard_negatives, "random_negatives": random_negatives}
+
+    def _attach_label_exposure(
+        self,
+        debug_payload: Dict[str, Any],
+        kept_classes: List[str],
+        selected_stems: List[Dict[str, Any]],
+        generator: Optional[torch.Generator],
+    ) -> None:
+        # The mask travels in the debug payload as a plain list so the 3-tuple return
+        # used by the preview/audit tools stays the same and stays JSON-friendly.
+        if not self.label_exposure_enabled:
+            return
+        mask, exposure = self._build_label_exposure_mask(kept_classes, selected_stems, generator=generator)
+        debug_payload["target_mask"] = mask.tolist()
+        debug_payload["label_exposure"] = exposure
 
     @staticmethod
     def _resolve_split_dir(root: Path, split: str) -> Path:
@@ -966,6 +1049,7 @@ class SlakhDataset(Dataset):
                     for stem in selected_stems
                 ],
             }
+            self._attach_label_exposure(debug_payload, kept_classes, selected_stems, generator)
             if export_debug:
                 debug_payload["rendered_audio"] = rendered_audio
             return excerpt, target, debug_payload
@@ -1010,6 +1094,8 @@ class SlakhDataset(Dataset):
                 for stem in selected_stems
             ],
         }
+        # Every training item must carry a mask when exposure is on, or the batch drops all masks.
+        self._attach_label_exposure(debug_payload, kept_classes, selected_stems, generator)
         if export_debug:
             debug_payload["rendered_audio"] = rendered_audio
         return excerpt, target, debug_payload
@@ -1048,17 +1134,22 @@ class SlakhDataset(Dataset):
             waveform = audio.load_waveform(str(item["audio_path"]), self.sample_rate)
             excerpt, _ = crop_waveform(waveform, self.clip_num_samples, self.train_mode)
             target = torch.tensor(item["label"], dtype=torch.long)
+            debug_payload = {}
         else:
             # Multilabel mode either uses the original full mix crop or builds a synthetic
             # submix from a subset of active stems, depending on the remix settings.
-            excerpt, target, _ = self._build_multilabel_excerpt_and_target(item, dataset_index=idx)
+            excerpt, target, debug_payload = self._build_multilabel_excerpt_and_target(item, dataset_index=idx)
 
         # The datamodule collate function expects this exact dictionary structure.
-        return {
+        sample = {
             "inputs": excerpt,
             "target": target,
             "domain": self.domain,
         }
+        if "target_mask" in debug_payload:
+            # The loss and metrics already skip masked labels (the same path OpenMIC uses).
+            sample["target_mask"] = torch.tensor(debug_payload["target_mask"], dtype=torch.float32)
+        return sample
 
     def _build_multilabel_target(
         self,

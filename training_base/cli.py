@@ -46,7 +46,15 @@ def build_trainer(cfg):
         checkpoint_dir = os.path.join(cfg.trainer.save_dir, cfg.experiment.name, "checkpoints")
 
     if cfg.data.val is not None:
-        callbacks = [ModelCheckpoint(dirpath=checkpoint_dir, save_top_k=1, monitor="val/loss", mode="min")]
+        callbacks = [
+            ModelCheckpoint(
+                dirpath=checkpoint_dir,
+                save_top_k=1,
+                monitor=cfg.trainer.checkpoint_monitor,
+                mode=cfg.trainer.checkpoint_mode,
+                save_last=cfg.trainer.save_last,
+            )
+        ]
     else:
         callbacks = [ModelCheckpoint(dirpath=checkpoint_dir, save_top_k=1, monitor=None, save_last=True)]
     logger = build_logger(cfg)

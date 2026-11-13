@@ -183,6 +183,43 @@ SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS = {
 }
 
 
+# Sound-alike map used by the "label_exposure" option on synthetic training sets.
+#
+# Synthetic labels are complete: every class that is not in the mix is a true negative.
+# Showing all of them to the loss makes most labels "absent", which pushes the model
+# towards predicting "absent". With label_exposure enabled, a training clip only
+# exposes its positives, the negatives listed here, and a random share of the rest.
+#
+# Read an entry as: keep "<key> = absent" in the loss whenever any of the listed
+# instruments is audible in the clip, either as a kept target or as a context stem.
+# These are the negatives worth learning: the model hears something close to <key>
+# and has to say no. Context-only names (viola, tuba, horn, oboe, cor_anglais,
+# bassoon, piccolo, harp) are the identities used in SLAKH_MIDI_TO_OPENMIC_CLASS and
+# SYNTHSOD_INSTRUMENT_TO_OPENMIC_CLASS. Keys missing from the config's label_names are
+# ignored, so drums/cymbals/voice entries are simply left out for now.
+#
+# A config can replace this map with label_exposure.sound_alikes.
+DEFAULT_SOUND_ALIKE_NEGATIVES: Dict[str, List[str]] = {
+    "violin": ["viola", "cello"],
+    "cello": ["viola", "violin", "bass", "bassoon"],
+    "bass": ["cello", "tuba", "bassoon"],
+    "flute": ["piccolo", "clarinet", "oboe"],
+    "clarinet": ["oboe", "cor_anglais", "bassoon", "saxophone", "flute"],
+    "saxophone": ["clarinet", "oboe", "trumpet", "trombone"],
+    "trumpet": ["trombone", "horn", "saxophone"],
+    "trombone": ["trumpet", "horn", "tuba", "saxophone"],
+    "guitar": ["banjo", "mandolin", "ukulele", "harp"],
+    "banjo": ["guitar", "mandolin", "ukulele", "harp"],
+    "mandolin": ["guitar", "banjo", "ukulele", "harp"],
+    "ukulele": ["guitar", "banjo", "mandolin", "harp"],
+    "piano": ["organ", "synthesizer", "mallet_percussion", "harp"],
+    "organ": ["accordion", "synthesizer", "piano"],
+    "accordion": ["organ", "synthesizer"],
+    "synthesizer": ["organ", "piano"],
+    "mallet_percussion": ["piano", "harp"],
+}
+
+
 INDEX_TO_OPENMIC_CLASS = {index: name for name, index in OPENMIC_CLASS_TO_INDEX.items()}
 
 

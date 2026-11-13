@@ -265,6 +265,57 @@ does not provide new timings; dropped or voice-capped notes can make those
 intervals overestimate rendered activity. Listening checks timing, not exact
 note-for-note activity. The loader does not infer corrected intervals from audio.
 
+### Train with sound-alike negative labels (label exposure)
+
+Synthetic clips have complete labels, so most of a clip's labels are "absent" and
+the model learns to lean towards "absent". With `label_exposure` enabled under
+`data.train.params`, each training clip only sends these labels to the loss:
+
+- every positive (kept target class);
+- "absent" for each class whose sound-alike is audible in the clip, as a kept target
+  or as a context stem (for example violin when a viola is playing, trombone when a
+  trumpet is playing). The map is `DEFAULT_SOUND_ALIKE_NEGATIVES` in
+  `training_base/data/utils.py`; a config can replace it with `sound_alikes`;
+- "absent" for every other class with probability `random_negative_prob`
+  (overridable per class with `random_negative_prob_per_class`). Keep this above 0:
+  a class with no sound-alike in the clip would otherwise never see a negative.
+
+Everything else is masked out of the loss, using the same mask path as OpenMIC's
+unlabelled classes. Validation and test keep their full labels.
+
+```json
+"label_exposure": {
+  "enabled": true,
+  "random_negative_prob": 0.2,
+  "random_negative_prob_per_class": {}
+}
+```
+
+Two 17-class configs (drums and cymbals left out of the label space for now) differ
+only in this setting, so they form a fair comparison:
+
+- `configs/slakh_synthsod_aligned_rendered_to_openmic_clap_17_classes_baseline.json`
+- `configs/slakh_synthsod_aligned_rendered_to_openmic_clap_17_classes_hard_negatives.json`
+
+Both validate on OpenMIC val and keep the checkpoint with the best `val/f1_macro`,
+plus `last.ckpt` (`trainer.checkpoint_monitor`, `trainer.checkpoint_mode`,
+`trainer.save_last`; other configs keep the old `val/loss` rule). Checkpoint
+selection on synthetic validation loss would penalise this change, because a model
+that says "present" more often scores a worse loss on full synthetic labels.
+Drum and cymbal stems still play as unlabelled context.
+
+Before training, check the exposed label counts per class:
+
+```bash
+python scripts/audit_combined_training_epoch.py \
+  --config configs/slakh_synthsod_aligned_rendered_to_openmic_clap_17_classes_hard_negatives.json \
+  --output-dir rendered_stem_pairs/label_exposure_audit --preview-count 10
+```
+
+The final table lists positives, hard negatives, random negatives and masked labels
+per class. `pos% of exposed` is the share of positives among the labels that reach the
+loss; tune `random_negative_prob` (or per-class overrides) from it.
+
 ### 1. Build the Slakh MIDI index once
 
 we build this index so that during training we won't have to open the midi files one by one and check whether the instrument is active. It allows us for faster loading of dataset and training. 

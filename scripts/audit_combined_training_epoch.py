@@ -124,6 +124,12 @@ def save_preview(ffmpeg, output, position, audit, waveform, target, capture, lab
         f"Epoch position: {position}; crop: {audit['crop_start_sec']:.6f}-{audit['crop_end_sec']:.6f}s",
         f"Mode: {audit['mode']}", f"Active target labels: {', '.join(active) or '(none)'}",
         "Context: " + (", ".join(record["class_name"] for _, record in stems if record["role"] == "context") or "(none)"),
+    ]
+    if audit.get("label_exposure"):
+        exposure = audit["label_exposure"]
+        lines += [f"Exposed hard negatives: {', '.join(exposure['hard_negatives']) or '(none)'}",
+                  f"Exposed random negatives: {', '.join(exposure['random_negatives']) or '(none)'}"]
+    lines += [
         "", "Stem | class | role | origin | active seconds | file",
     ]
     lines.extend(f"{record['stem_id']} | {record['class_name']} | {record['role']} | {record['origin']} | {record['active_sec']:.3f} | {record['file']}"
@@ -148,8 +154,8 @@ def main():
         parser.error("ffmpeg with libmp3lame must be on PATH to export listening examples")
     raw_config = load_json(args.config)
     cfg = parse_project_config(raw_config)
-    if cfg.data.task_type != "multilabel" or cfg.data.train.type != "slakh" or cfg.data.val is None or cfg.data.val.type != "slakh":
-        parser.error("Use a combined synthetic multilabel training/validation config")
+    if cfg.data.task_type != "multilabel" or cfg.data.train.type != "slakh":
+        parser.error("Use a combined synthetic multilabel training config")
     output = args.output_dir.expanduser().resolve()
     if output.exists():
         parser.error("--output-dir must be a new folder")
@@ -161,13 +167,15 @@ def main():
     if not dataset.stem_remix_enabled:
         raise ValueError("The audit requires stem_remix=true")
     pool = Counter(dataset_source(item) for item in dataset.samples)
-    val_pool = Counter(dataset_source(item) for item in dm.val_dataset.samples)
+    # Validation may be OpenMIC (real audio); the source/overlap checks only apply to synthetic validation.
+    synthetic_val = cfg.data.val is not None and cfg.data.val.type == "slakh"
+    val_pool = Counter(dataset_source(item) for item in dm.val_dataset.samples) if synthetic_val else {}
     render_capable = sum(any(stem.get("rendered_variants") for stem in item.get("stems", []) + item.get("context_stems", []))
                          for item in dataset.samples)
     if not pool["slakh"] or not pool["synthsod"] or not render_capable:
         raise ValueError(f"Expected Slakh, SynthSOD and rendered Slakh sources; pool={dict(pool)}, render-capable tracks={render_capable}")
     train_ids = {(dataset_source(item), item["track_id"]) for item in dataset.samples}
-    val_ids = {(dataset_source(item), item["track_id"]) for item in dm.val_dataset.samples}
+    val_ids = {(dataset_source(item), item["track_id"]) for item in dm.val_dataset.samples} if synthetic_val else set()
     overlap = train_ids & val_ids
     if overlap:
         raise ValueError(f"Training and validation track IDs overlap: {sorted(overlap)[:10]}")
@@ -189,9 +197,20 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     (output / "config.json").write_text(json.dumps(raw_config, indent=2) + "\n", encoding="utf-8")
     counts, stem_counts, context_counts = Counter(), Counter(), Counter()
+    # label_exposure: negatives that reach the loss, split by why they were kept.
+    exposure_enabled = bool(getattr(dataset, "label_exposure_enabled", False))
+    hard_negative_counts, random_negative_counts = Counter(), Counter()
     by_source, by_origin = defaultdict(Counter), defaultdict(Counter)
     source_examples, modes = Counter(), Counter()
     previews, empty, total, rendered_examples = [], 0, 0, 0
+
+    def exposure_stats(label):
+        positives = counts[label]
+        negatives = hard_negative_counts[label] + random_negative_counts[label]
+        return dict(exposed_hard_negatives=hard_negative_counts[label],
+                    exposed_random_negatives=random_negative_counts[label],
+                    exposed_negatives=negatives, masked_labels=total - positives - negatives,
+                    exposed_positive_percent=100 * positives / (positives + negatives) if positives + negatives else 0)
 
     def report(complete):
         warnings = []
@@ -211,7 +230,9 @@ def main():
                                      slakh_clip_count=by_source["slakh"][label], synthsod_clip_count=by_source["synthsod"][label],
                                      slakh_original_contribution=by_origin["slakh_original"][label],
                                      slakh_rendered_contribution=by_origin["slakh_rendered"][label],
-                                     synthsod_contribution=by_origin["synthsod"][label]) for label in dataset.label_names},
+                                     synthsod_contribution=by_origin["synthsod"][label],
+                                     **(exposure_stats(label) if exposure_enabled else {})) for label in dataset.label_names},
+            label_exposure_enabled=exposure_enabled,
             context_clip_counts=dict(context_counts), previews=previews, warnings=warnings,
             notes=["Counts cover the entire emitted training epoch after replacement, activity filtering and class dropping.",
                    "Preview selection is stratified by source availability; the epoch itself is not reweighted.",
@@ -243,6 +264,12 @@ def main():
                 by_origin[origin].update(names)
             rendered_examples += bool(origins.get("slakh_rendered"))
             context_counts.update(contexts)
+            exposure = audit.get("label_exposure")
+            if exposure_enabled and exposure is None:
+                raise ValueError(f"label_exposure is enabled but clip {audit['track_id']} carries no mask")
+            if exposure:
+                hard_negative_counts.update(exposure["hard_negatives"])
+                random_negative_counts.update(exposure["random_negatives"])
         for preview in batch["previews"]:
             index = preview["batch_index"]
             previews.append(save_preview(ffmpeg, output, total + index + 1, batch["audit"][index],
@@ -263,6 +290,12 @@ def main():
     for label, values in summary["instruments"].items():
         print(f"{label:<20} {values['present_examples']:>8} {values['presence_percent']:>9.2f}% "
               f"{values['slakh_clip_count']:>8} {values['synthsod_clip_count']:>9} {values['slakh_rendered_contribution']:>9}")
+    if exposure_enabled:
+        # What the loss actually sees per class once masked labels are removed.
+        print(f"\n{'instrument':<20} {'pos':>7} {'hard neg':>9} {'rand neg':>9} {'masked':>8} {'pos% of exposed':>16}")
+        for label, values in summary["instruments"].items():
+            print(f"{label:<20} {values['present_examples']:>7} {values['exposed_hard_negatives']:>9} "
+                  f"{values['exposed_random_negatives']:>9} {values['masked_labels']:>8} {values['exposed_positive_percent']:>15.2f}%")
     for warning in summary["warnings"]:
         print(f"WARNING: {warning}")
     print(f"Reports and listening examples: {output}")

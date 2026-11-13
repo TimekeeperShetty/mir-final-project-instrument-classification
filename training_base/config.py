@@ -37,6 +37,13 @@ class TrainerConfig:
     num_sanity_val_steps: int = 0
     fast_dev_run: bool = False
     save_dir: Optional[str] = None
+    # Which validation metric picks the "best" checkpoint (used by the post-fit test).
+    # The defaults keep the historical behaviour; a config can switch to e.g.
+    # "val/f1_macro" with mode "max".
+    checkpoint_monitor: str = "val/loss"
+    checkpoint_mode: str = "min"
+    # Also keep the final epoch's weights next to the best one.
+    save_last: bool = False
 
 
 @dataclass
